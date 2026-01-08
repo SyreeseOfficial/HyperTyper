@@ -50,6 +50,28 @@ def clear_screen():
     else:
         os.system('clear')
 
+def splash_screen():
+    """Displays a cool ASCII art logo on startup."""
+    clear_screen()
+    logo = f"""
+{Fore.MAGENTA}{Style.BRIGHT}
+  _   _  __   __  ____   _____   ____  
+ | | | | \\ \\ / / |  _ \\ | ____| |  _ \\ 
+ | |_| |  \\ V /  | |_) ||  _|   | |_) |
+ |  _  |   | |   |  __/ | |___  |  _ < 
+ |_| |_|   |_|   |_|    |_____| |_| \\_\\
+    {Fore.CYAN}
+  _____  __   __  ____   _____   ____  
+ |_   _| \\ \\ / / |  _ \\ | ____| |  _ \\ 
+   | |    \\ V /  | |_) ||  _|   | |_) |
+   | |     | |   |  __/ | |___  |  _ < 
+   |_|     |_|   |_|    |_____| |_| \\_\\
+    {Style.RESET_ALL}
+    """
+    print(logo)
+    print(f"\n\t{Fore.YELLOW}Press Enter to Start...{Style.RESET_ALL}")
+    input()
+
 def countdown():
     """Runs a 3-2-1-GO countdown."""
     for i in [3, 2, 1]:
@@ -130,6 +152,7 @@ def streak_mode(mode_name, word_filename):
         score = 0
         total_chars_typed = 0
         correct_words = 0
+        combo = 0
         start_time = time.time()
         time_limit = 30.0
         
@@ -141,10 +164,20 @@ def streak_mode(mode_name, word_filename):
 
             remaining = max(0, int(time_limit - elapsed))
             
+            # Determine multiplier and combo text
+            multiplier = 1.0
+            combo_text = ""
+            if combo >= 5:
+                multiplier = 2.0
+                combo_text = f" {Fore.RED}{Style.BRIGHT}ON FIRE! (x2.0){Style.RESET_ALL}"
+            elif combo >= 3:
+                multiplier = 1.5
+                combo_text = f" {Fore.YELLOW}{Style.BRIGHT}HEATING UP! (x1.5){Style.RESET_ALL}"
+            
             clear_screen()
             print(f"{Fore.CYAN}--- {mode_name.upper()} MODE ---{Style.RESET_ALL}")
-            print(f"CURRENT SCORE: {Fore.YELLOW}{score}{Style.RESET_ALL}   |   TIME LEFT: {Fore.YELLOW}~{remaining}s{Style.RESET_ALL}")
-            print("-" * 40)
+            print(f"SCORE: {Fore.YELLOW}{score}{Style.RESET_ALL}  |  TIME: {Fore.YELLOW}~{remaining}s{Style.RESET_ALL}  |  COMBO: {Fore.GREEN}{combo}{Style.RESET_ALL}{combo_text}")
+            print("-" * 60)
             print()
             
             target_word = random.choice(current_words)
@@ -163,14 +196,18 @@ def streak_mode(mode_name, word_filename):
 
             # 3. Sudden Death Check
             if user_input == target_word:
+                combo += 1
                 word_len = len(target_word)
-                score += word_len
+                points = int(word_len * multiplier)
+                score += points
+                
                 total_chars_typed += word_len
                 correct_words += 1
                 # Green flash logic: Just print a quick success line before clearing
-                print(f"{Fore.GREEN}        {target_word} OK!{Style.RESET_ALL}")
+                print(f"{Fore.GREEN}        {target_word} OK! (+{points}){Style.RESET_ALL}")
                 time.sleep(0.2)
             else:
+                combo = 0 # Reset combo on mistake (though game ends here anyway)
                 print()
                 print(f"{Fore.RED}Wrong! You typed '{user_input}', expected '{target_word}'.{Style.RESET_ALL}")
                 break # Go to Game Over logic
@@ -283,7 +320,7 @@ if __name__ == "__main__":
 
 
     # Clear screen immediately on launch
-    clear_screen()
+    splash_screen()
     try:
         main_menu()
     except KeyboardInterrupt:
