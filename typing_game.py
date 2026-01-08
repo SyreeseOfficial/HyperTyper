@@ -4,6 +4,8 @@ import random
 import sys
 import time
 import json
+import shutil
+import re
 from colorama import Fore, Back, Style, init
 
 # Initialize colorama
@@ -41,6 +43,52 @@ def load_words(filename):
     return words
 
 
+def get_visible_length(s):
+    """Returns the length of the string without ANSI color codes."""
+    ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+    return len(ansi_escape.sub('', s))
+
+def draw_centered(lines, input_prompt=None):
+    """
+    Clears screen and draws the list of 'lines' centered vertically and horizontally.
+    If input_prompt is provided, it is printed centered below the lines,
+    and the function returns the user input.
+    """
+    clear_screen()
+    
+    # Get terminal size
+    cols, rows = shutil.get_terminal_size()
+    
+    # Calculate total height of content
+    content_height = len(lines)
+    if input_prompt is not None:
+        content_height += 2 # Add spacing + prompt line
+        
+    # Vertical padding (top)
+    # Ensure at least 0
+    top_padding = max(0, (rows - content_height) // 2)
+    
+    # Print top newlines
+    print("\n" * top_padding)
+    
+    # Print each line centered
+    for line in lines:
+        vis_len = get_visible_length(line)
+        left_padding = max(0, (cols - vis_len) // 2)
+        print(" " * left_padding + line)
+        
+    if input_prompt is not None:
+        # Print a blank spacer line
+        print()
+        # Calculate padding for prompt
+        vis_len = get_visible_length(input_prompt)
+        left_padding = max(0, (cols - vis_len) // 2)
+        
+        # Print prompt with padding, no newline at end so cursor stays there
+        print(" " * left_padding + input_prompt, end='')
+        return input("")
+
+
 
 def clear_screen():
     """Clears the terminal screen."""
@@ -52,40 +100,42 @@ def clear_screen():
 
 def splash_screen():
     """Displays a cool ASCII art logo on startup."""
-    clear_screen()
-    logo = f"""
-{Fore.MAGENTA}{Style.BRIGHT}
-  _   _  __   __  ____   _____   ____  
- | | | | \\ \\ / / |  _ \\ | ____| |  _ \\ 
- | |_| |  \\ V /  | |_) ||  _|   | |_) |
- |  _  |   | |   |  __/ | |___  |  _ < 
- |_| |_|   |_|   |_|    |_____| |_| \\_\\
-    {Fore.CYAN}
-  _____  __   __  ____   _____   ____  
- |_   _| \\ \\ / / |  _ \\ | ____| |  _ \\ 
-   | |    \\ V /  | |_) ||  _|   | |_) |
-   | |     | |   |  __/ | |___  |  _ < 
-   |_|     |_|   |_|    |_____| |_| \\_\\
-    {Style.RESET_ALL}
-    """
-    print(logo)
-    print(f"\n\t{Fore.YELLOW}Press Enter to Start...{Style.RESET_ALL}")
-    input()
+    logo = [
+        f"{Fore.MAGENTA}{Style.BRIGHT}",
+        r"  _   _  __   __  ____   _____   ____  ",
+        r" | | | | \ \ / / |  _ \ | ____| |  _ \ ",
+        r" | |_| |  \ V /  | |_) ||  _|   | |_) |",
+        r" |  _  |   | |   |  __/ | |___  |  _ < ",
+        " |_| |_|   |_|   |_|    |_____| |_| \\_\\",
+        f"{Fore.CYAN}",
+        r"   _____  __   __  ____   _____   ____  ",
+        r"  |_   _| \ \ / / |  _ \ | ____| |  _ \ ",
+        r"    | |    \ V /  | |_) ||  _|   | |_) |",
+        r"    | |     | |   |  __/ | |___  |  _ < ",
+        "   |_|     |_|   |_|    |_____| |_| \\_\\",
+        f"{Style.RESET_ALL}"
+    ]
+    
+    draw_centered(logo, input_prompt=f"{Fore.YELLOW}Press Enter to Start...{Style.RESET_ALL}")
 
 def countdown():
     """Runs a 3-2-1-GO countdown."""
     for i in [3, 2, 1]:
-        clear_screen()
-        print(f"\n\n\n\t\t{Fore.CYAN}{Style.BRIGHT}{i}")
+        draw_centered([f"{Fore.CYAN}{Style.BRIGHT}{i}"])
         time.sleep(1)
     
-    clear_screen()
-    print(f"\n\n\n\t\t{Fore.GREEN}{Style.BRIGHT}GO!")
+    draw_centered([f"{Fore.GREEN}{Style.BRIGHT}GO!"])
     time.sleep(0.5)
 
 def pause():
     """Waits for user input to continue."""
-    input("\nPress Enter to continue...")
+    # We can't really center this effectively without clearing the screen,
+    # but usually pause follows some output. 
+    # If we want to center the "Press Enter" message, we'd need to know what was on screen.
+    # For now, let's keep it simple or we can just print it centered relative to the last known size? 
+    # Actually, the user wants "Action: Clear the screen...". 
+    # So if pause is a standalone screen (like after high scores), we can use draw_centered.
+    input(f"\n{Fore.YELLOW}Press Enter to continue...{Style.RESET_ALL}")
 
 def load_high_scores():
     """Loads high scores from JSON, returning a dict."""
@@ -109,33 +159,32 @@ def save_high_scores(scores):
     except IOError:
         print("\nWarning: Could not save high scores.")
 
-def update_high_score(mode_name, score):
-    """Updates the high score for a given mode if the new score is higher."""
+def check_high_score(mode_name, score):
+    """Updates the high score for a given mode if the new score is higher. Returns a message string."""
     scores = load_high_scores()
     current_best = scores.get(mode_name, 0)
     
     if score > current_best:
         scores[mode_name] = score
         save_high_scores(scores)
-        print(f"\n{Fore.GREEN}{Style.BRIGHT}NEW HIGH SCORE for {mode_name}: {score}!{Style.RESET_ALL}")
+        return f"{Fore.GREEN}{Style.BRIGHT}NEW HIGH SCORE for {mode_name}: {score}!{Style.RESET_ALL}"
     else:
-        print(f"\n{Fore.CYAN}High Score for {mode_name}: {current_best}{Style.RESET_ALL}")
+        return f"{Fore.CYAN}High Score for {mode_name}: {current_best}{Style.RESET_ALL}"
 
 def show_high_scores():
     """Displays all high scores."""
-    clear_screen()
-    print(f"{Fore.CYAN}{Style.BRIGHT}--- HIGH SCORES ---{Style.RESET_ALL}")
+    lines = [f"{Fore.CYAN}{Style.BRIGHT}--- HIGH SCORES ---{Style.RESET_ALL}"]
     scores = load_high_scores()
     
     if not scores:
-        print("No scores recording yet.")
+        lines.append("No scores recording yet.")
     else:
         for mode, score in scores.items():
-            print(f"{mode}: {Fore.YELLOW}{score}{Style.RESET_ALL}")
+            lines.append(f"{mode}: {Fore.YELLOW}{score}{Style.RESET_ALL}")
     
-    print("-" * 20)
-    print()
-    pause()
+    lines.append("-" * 20)
+    
+    draw_centered(lines, input_prompt=f"{Fore.YELLOW}Press Enter to continue...{Style.RESET_ALL}")
 
 # --- Game Modes ---
 
@@ -174,18 +223,20 @@ def streak_mode(mode_name, word_filename):
                 multiplier = 1.5
                 combo_text = f" {Fore.YELLOW}{Style.BRIGHT}HEATING UP! (x1.5){Style.RESET_ALL}"
             
-            clear_screen()
-            print(f"{Fore.CYAN}--- {mode_name.upper()} MODE ---{Style.RESET_ALL}")
-            print(f"SCORE: {Fore.YELLOW}{score}{Style.RESET_ALL}  |  TIME: {Fore.YELLOW}~{remaining}s{Style.RESET_ALL}  |  COMBO: {Fore.GREEN}{combo}{Style.RESET_ALL}{combo_text}")
-            print("-" * 60)
-            print()
-            
             target_word = random.choice(current_words)
-            print(f"Word:  {Style.BRIGHT}{Fore.WHITE}{target_word}{Style.RESET_ALL}")
-            print()
+            
+            # Construct Game Loop UI
+            lines = [
+                f"{Fore.CYAN}--- {mode_name.upper()} MODE ---{Style.RESET_ALL}",
+                f"SCORE: {Fore.YELLOW}{score}{Style.RESET_ALL}  |  TIME: {Fore.YELLOW}~{remaining}s{Style.RESET_ALL}  |  COMBO: {Fore.GREEN}{combo}{Style.RESET_ALL}{combo_text}",
+                "-" * 60,
+                "",
+                f"Word:  {Style.BRIGHT}{Fore.WHITE}{target_word}{Style.RESET_ALL}",
+                ""
+            ]
             
             try:
-                user_input = input("Type it: ").strip()
+                user_input = draw_centered(lines, input_prompt="Type it: ").strip()
             except (EOFError, KeyboardInterrupt):
                 return
 
@@ -203,13 +254,24 @@ def streak_mode(mode_name, word_filename):
                 
                 total_chars_typed += word_len
                 correct_words += 1
-                # Green flash logic: Just print a quick success line before clearing
-                print(f"{Fore.GREEN}        {target_word} OK! (+{points}){Style.RESET_ALL}")
+                
+                # Success Flash - Centered manually since we don't want to clear screen
+                msg = f"{Fore.GREEN}{target_word} OK! (+{points}){Style.RESET_ALL}"
+                cols, _ = shutil.get_terminal_size()
+                vis_len = get_visible_length(msg)
+                padding = max(0, (cols - vis_len) // 2)
+                print(" " * padding + msg)
                 time.sleep(0.2)
             else:
                 combo = 0 # Reset combo on mistake (though game ends here anyway)
+                
+                # Fail Message - Centered manually
+                msg = f"{Fore.RED}Wrong! You typed '{user_input}', expected '{target_word}'.{Style.RESET_ALL}"
+                cols, _ = shutil.get_terminal_size()
+                vis_len = get_visible_length(msg)
+                padding = max(0, (cols - vis_len) // 2)
                 print()
-                print(f"{Fore.RED}Wrong! You typed '{user_input}', expected '{target_word}'.{Style.RESET_ALL}")
+                print(" " * padding + msg)
                 break # Go to Game Over logic
 
         # --- GAME OVER SCREEN ---
@@ -221,20 +283,24 @@ def streak_mode(mode_name, word_filename):
         minutes = final_elapsed / 60.0
         wpm = (total_chars_typed / 5.0) / minutes if minutes > 0 else 0
         
-        print(f"\n{Fore.RED}{Style.BRIGHT}GAME OVER{Style.RESET_ALL}")
-        print(f"Final Score: {Fore.YELLOW}{score}{Style.RESET_ALL}")
+        lines = [
+            "",
+            f"{Fore.RED}{Style.BRIGHT}GAME OVER{Style.RESET_ALL}",
+            f"Final Score: {Fore.YELLOW}{score}{Style.RESET_ALL}",
+            "-" * 30,
+            f"Total Words Typed: {correct_words}",
+            f"WPM: {Fore.CYAN}{wpm:.1f}{Style.RESET_ALL}",
+            "-" * 30,
+            "",
+            f"[{Fore.CYAN}Press ENTER for Menu{Style.RESET_ALL}] or [{Fore.CYAN}Press 'R' to Retry{Style.RESET_ALL}]"
+        ]
         
-        # Show Stats
-        print("-" * 30)
-        print(f"Total Words Typed: {correct_words}")
-        print(f"WPM: {Fore.CYAN}{wpm:.1f}{Style.RESET_ALL}")
-        print("-" * 30)
-        
-        update_high_score(mode_name, score) # Pass dynamic mode name
-        print()
-        
-        print(f"[{Fore.CYAN}Press ENTER for Menu{Style.RESET_ALL}] or [{Fore.CYAN}Press 'R' to Retry{Style.RESET_ALL}]")
-        cmd = input().strip().lower()
+
+        hs_message = check_high_score(mode_name, score) # Renamed or new helper?
+        if hs_message:
+            lines.insert(2, hs_message) # Insert after GAME OVER?
+            
+        cmd = draw_centered(lines, input_prompt="").strip().lower()
         if cmd == 'r':
             continue # Restart loop
         else:
@@ -243,18 +309,18 @@ def streak_mode(mode_name, word_filename):
 def play_menu():
     """Submenu for selecting a game mode."""
     while True:
-        clear_screen()
-        print(f"{Fore.CYAN}{Style.BRIGHT}--- SELECT CATEGORY ---{Style.RESET_ALL}")
-        print(f"{Fore.CYAN}1. Standard Streak{Style.RESET_ALL}")
-        print(f"{Fore.CYAN}2. Capital Cities{Style.RESET_ALL}")
-        print(f"{Fore.CYAN}3. Foods{Style.RESET_ALL}")
-        print(f"{Fore.CYAN}4. Animals{Style.RESET_ALL}")
-        print(f"{Fore.CYAN}5. Lorem Ipsum{Style.RESET_ALL}")
-        print(f"{Fore.CYAN}6. Back to Main Menu{Style.RESET_ALL}")
-        print()
+        lines = [
+            f"{Fore.CYAN}{Style.BRIGHT}--- SELECT CATEGORY ---{Style.RESET_ALL}",
+            f"{Fore.CYAN}1. Standard Streak{Style.RESET_ALL}",
+            f"{Fore.CYAN}2. Capital Cities{Style.RESET_ALL}",
+            f"{Fore.CYAN}3. Foods{Style.RESET_ALL}",
+            f"{Fore.CYAN}4. Animals{Style.RESET_ALL}",
+            f"{Fore.CYAN}5. Lorem Ipsum{Style.RESET_ALL}",
+            f"{Fore.CYAN}6. Back to Main Menu{Style.RESET_ALL}"
+        ]
         
         try:
-            choice = input("Select an option (1-6): ").strip()
+            choice = draw_centered(lines, input_prompt="Select an option (1-6): ").strip()
         except (EOFError, KeyboardInterrupt):
             break
 
@@ -275,26 +341,27 @@ def play_menu():
 
 def show_placeholder(feature_name):
     """Displays a 'Coming Soon' message."""
-    clear_screen()
-    print(f"--- {feature_name} ---")
-    print("\nComing Soon!\n")
-    pause()
+    lines = [
+        f"--- {feature_name} ---",
+        "\nComing Soon!\n"
+    ]
+    draw_centered(lines, input_prompt=f"{Fore.YELLOW}Press Enter to continue...{Style.RESET_ALL}")
 
 # --- Main Menu ---
 
 def main_menu():
     """Runs the main menu loop."""
     while True:
-        clear_screen()
-        print(f"{Fore.CYAN}{Style.BRIGHT}=== CLI TYPING GAME ==={Style.RESET_ALL}")
-        print(f"{Fore.CYAN}1. Play Game{Style.RESET_ALL}")
-        print(f"{Fore.CYAN}2. High Scores{Style.RESET_ALL}")
-        print(f"{Fore.CYAN}3. Settings{Style.RESET_ALL}")
-        print(f"{Fore.CYAN}4. Quit{Style.RESET_ALL}")
-        print()
+        lines = [
+            f"{Fore.CYAN}{Style.BRIGHT}=== CLI TYPING GAME ==={Style.RESET_ALL}",
+            f"{Fore.CYAN}1. Play Game{Style.RESET_ALL}",
+            f"{Fore.CYAN}2. High Scores{Style.RESET_ALL}",
+            f"{Fore.CYAN}3. Settings{Style.RESET_ALL}",
+            f"{Fore.CYAN}4. Quit{Style.RESET_ALL}"
+        ]
         
         try:
-            choice = input("Select an option (1-4): ").strip()
+            choice = draw_centered(lines, input_prompt="Select an option (1-4): ").strip()
         except (EOFError, KeyboardInterrupt):
             print("\nGoodbye!")
             break
