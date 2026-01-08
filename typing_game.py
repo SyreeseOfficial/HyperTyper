@@ -72,8 +72,10 @@ def save_settings(new_settings):
     except IOError:
         print(f"\n{Fore.RED}Warning: Could not save settings.{Style.RESET_ALL}")
 
-def load_words(filename):
-    """Loads words from data/filename, filtering invalid ones. Falls back to BACKUP_WORDS if needed."""
+def load_words(filename, exact_match=False):
+    """Loads words from data/filename. Falls back to BACKUP_WORDS if needed.
+    If exact_match is True, preserves case and allows punctuation/spaces.
+    """
     words = []
     # Look for filename inside the 'data' folder
     file_path = os.path.join("data", filename)
@@ -82,9 +84,16 @@ def load_words(filename):
         try:
             with open(file_path, 'r') as f:
                 for line in f:
-                    w = line.strip().lower()
-                    if len(w) >= 3 and w.isalpha():
-                        words.append(w)
+                    if exact_match:
+                        # Just strip newlines, keep content as is
+                        w = line.strip()
+                        if w:
+                            words.append(w)
+                    else:
+                        # Standard mode logic
+                        w = line.strip().lower()
+                        if len(w) >= 3 and w.isalpha():
+                            words.append(w)
         except IOError:
             pass # Keep list empty to trigger backup
 
@@ -371,11 +380,11 @@ def show_high_scores():
 
 # --- Game Modes ---
 
-def streak_mode(mode_name, word_filename):
+def streak_mode(mode_name, word_filename, exact_match=False):
     """Runs the Streak Mode game loop with a 30s global timer and game feel."""
     
     # Load words for this mode
-    current_words = load_words(word_filename)
+    current_words = load_words(word_filename, exact_match=exact_match)
     
     while True:
         # Countdown
@@ -569,11 +578,13 @@ def play_menu():
             f"{Fore.CYAN}3. Foods{Style.RESET_ALL}",
             f"{Fore.CYAN}4. Animals{Style.RESET_ALL}",
             f"{Fore.CYAN}5. Lorem Ipsum{Style.RESET_ALL}",
-            f"{Fore.CYAN}6. Back to Main Menu{Style.RESET_ALL}"
+            f"{Fore.CYAN}6. Code Master (Python){Style.RESET_ALL}",
+            f"{Fore.CYAN}7. Terminal (Linux/Bash){Style.RESET_ALL}",
+            f"{Fore.CYAN}8. Back to Main Menu{Style.RESET_ALL}"
         ]
         
         try:
-            choice = draw_centered(lines, input_prompt="Select an option (1-6): ").strip()
+            choice = draw_centered(lines, input_prompt="Select an option (1-8): ").strip()
         except (EOFError, KeyboardInterrupt):
             break
 
@@ -588,6 +599,10 @@ def play_menu():
         elif choice == '5':
             streak_mode("Lorem", "lorem.txt")
         elif choice == '6':
+            streak_mode("Code Master", "code.txt", exact_match=True)
+        elif choice == '7':
+            streak_mode("Terminal", "terminal.txt", exact_match=True)
+        elif choice == '8':
             break
         else:
             pass

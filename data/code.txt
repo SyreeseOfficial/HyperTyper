@@ -1,0 +1,36 @@
+def __init__(self):
+return True
+import os
+print(f"{x}")
+if x == y:
+class MyClass:
+for i in range(10):
+while True:
+try:
+except Exception as e:
+with open(file) as f:
+lambda x: x**2
+[x for x in y]
+{k: v for k, v in d}
+@staticmethod
+async def main():
+await asyncio.sleep(1)
+raise ValueError("Error")
+assert x > 0
+from datetime import datetime
+if __name__ == "__main__":
+str.join(",")
+os.path.join("a", "b")
+sys.exit(0)
+# This is a comment
+self.value = 42
+super().__init__()
+return None
+import json
+json.dumps(data)
+elif x is None:
+global variable
+yield from iterator
+f = lambda x, y: x + y
+del my_dict['key']
+range(0, 10, 2)

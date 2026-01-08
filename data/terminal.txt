@@ -1,0 +1,40 @@
+sudo apt update
+git commit -m "msg"
+ls -la
+docker ps
+chmod +x script.py
+rm -rf node_modules
+grep -r "text" .
+find . -name "*.py"
+ssh user@hostname
+tar -czvf file.tar.gz .
+curl -O http://site.com
+wget http://site.com
+systemctl status nginx
+journalctl -xe
+top
+htop
+df -h
+du -sh *
+netstat -tulpn
+ip addr show
+ping google.com
+git push origin main
+git pull
+git status
+mkdir -p path/to/dir
+touch newfile.txt
+cat file.txt | grep x
+echo "Hello" > out.txt
+tail -f /var/log/syslog
+history
+alias ll='ls -la'
+export PATH=$PATH:/bin
+mv old.txt new.txt
+cp -r folder new_folder
+whoami
+pwd
+man grep
+kill -9 1234
+ps aux | grep python
+sudo reboot
