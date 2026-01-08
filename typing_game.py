@@ -14,14 +14,18 @@ init(autoreset=True)
 HIGHSCORE_FILE = "highscores.json"
 WORD_FILE = "words.txt"
 BACKUP_WORDS = ["apple", "banana", "cherry", "date", "elderberry", "fig", "grape", "lemon", "lime", "mango"]
+
 # --- Helper Functions ---
 
 def load_words():
-    """Loads words from WORD_FILE, filtering invalid ones. Falls back to BACKUP_WORDS if needed."""
+    """Loads words from data/WORD_FILE, filtering invalid ones. Falls back to BACKUP_WORDS if needed."""
     words = []
-    if os.path.exists(WORD_FILE):
+    # Look for words.txt inside the 'data' folder
+    file_path = os.path.join("data", WORD_FILE)
+    
+    if os.path.exists(file_path):
         try:
-            with open(WORD_FILE, 'r') as f:
+            with open(file_path, 'r') as f:
                 for line in f:
                     w = line.strip().lower()
                     if len(w) >= 3 and w.isalpha():
@@ -30,7 +34,7 @@ def load_words():
             pass # Keep list empty to trigger backup
 
     if not words:
-        print(f"Warning: {WORD_FILE} not found or empty, using backup list.")
+        print(f"Warning: {file_path} not found or empty, using backup list.")
         time.sleep(2) # Give user a chance to see the warning
         return BACKUP_WORDS
     
@@ -115,80 +119,85 @@ def show_high_scores():
 
 def streak_mode():
     """Runs the Streak Mode game loop with a 30s global timer and game feel."""
-    # Countdown
-    countdown()
-    
-    score = 0
-    total_chars_typed = 0
-    correct_words = 0
-    start_time = time.time()
-    time_limit = 30.0
-    
     while True:
-        # 1. Check time BEFORE showing word
-        elapsed = time.time() - start_time
-        if elapsed >= time_limit:
-            break # Go to Game Over logic
-
-        remaining = max(0, int(time_limit - elapsed))
+        # Countdown
+        countdown()
         
-        clear_screen()
-        print(f"{Fore.CYAN}--- STREAK MODE ---{Style.RESET_ALL}")
-        print(f"CURRENT SCORE: {Fore.YELLOW}{score}{Style.RESET_ALL}   |   TIME LEFT: {Fore.YELLOW}~{remaining}s{Style.RESET_ALL}")
-        print("-" * 40)
-        print()
+        score = 0
+        total_chars_typed = 0
+        correct_words = 0
+        start_time = time.time()
+        time_limit = 30.0
         
-        target_word = random.choice(WORDS)
-        print(f"Word:  {Style.BRIGHT}{Fore.WHITE}{target_word}{Style.RESET_ALL}")
-        print()
-        
-        try:
-            user_input = input("Type it: ").strip()
-        except (EOFError, KeyboardInterrupt):
-            return
+        while True:
+            # 1. Check time BEFORE showing word
+            elapsed = time.time() - start_time
+            if elapsed >= time_limit:
+                break # Go to Game Over logic
 
-        # 2. Check time AFTER input
-        elapsed = time.time() - start_time
-        if elapsed >= time_limit:
-            break # Go to Game Over logic
-
-        # 3. Sudden Death Check
-        if user_input == target_word:
-            word_len = len(target_word)
-            score += word_len
-            total_chars_typed += word_len
-            correct_words += 1
-            # Green flash logic: Just print a quick success line before clearing
-            print(f"{Fore.GREEN}        {target_word} OK!{Style.RESET_ALL}")
-            time.sleep(0.2)
-        else:
+            remaining = max(0, int(time_limit - elapsed))
+            
+            clear_screen()
+            print(f"{Fore.CYAN}--- STREAK MODE ---{Style.RESET_ALL}")
+            print(f"CURRENT SCORE: {Fore.YELLOW}{score}{Style.RESET_ALL}   |   TIME LEFT: {Fore.YELLOW}~{remaining}s{Style.RESET_ALL}")
+            print("-" * 40)
             print()
-            print(f"{Fore.RED}Wrong! You typed '{user_input}', expected '{target_word}'.{Style.RESET_ALL}")
-            break # Go to Game Over logic
+            
+            target_word = random.choice(WORDS)
+            print(f"Word:  {Style.BRIGHT}{Fore.WHITE}{target_word}{Style.RESET_ALL}")
+            print()
+            
+            try:
+                user_input = input("Type it: ").strip()
+            except (EOFError, KeyboardInterrupt):
+                return
 
-    # --- GAME OVER SCREEN ---
-    final_elapsed = time.time() - start_time
-    # Cap elapsed at time_limit for calc if it ran out, but use actual for sudden death
-    # Actually, user wants "Time spent in minutes", so actual elapsed is best.
-    
-    if final_elapsed < 1.0: 
-        final_elapsed = 1.0 # Avoid div by zero
-    
-    minutes = final_elapsed / 60.0
-    wpm = (total_chars_typed / 5.0) / minutes if minutes > 0 else 0
-    
-    print(f"\n{Fore.RED}{Style.BRIGHT}GAME OVER{Style.RESET_ALL}")
-    print(f"Final Score: {Fore.YELLOW}{score}{Style.RESET_ALL}")
-    
-    # Show Stats
-    print("-" * 30)
-    print(f"Total Words Typed: {correct_words}")
-    print(f"WPM: {Fore.CYAN}{wpm:.1f}{Style.RESET_ALL}")
-    print("-" * 30)
-    
-    update_high_score("Streak", score)
-    print()
-    pause()
+            # 2. Check time AFTER input
+            elapsed = time.time() - start_time
+            if elapsed >= time_limit:
+                break # Go to Game Over logic
+
+            # 3. Sudden Death Check
+            if user_input == target_word:
+                word_len = len(target_word)
+                score += word_len
+                total_chars_typed += word_len
+                correct_words += 1
+                # Green flash logic: Just print a quick success line before clearing
+                print(f"{Fore.GREEN}        {target_word} OK!{Style.RESET_ALL}")
+                time.sleep(0.2)
+            else:
+                print()
+                print(f"{Fore.RED}Wrong! You typed '{user_input}', expected '{target_word}'.{Style.RESET_ALL}")
+                break # Go to Game Over logic
+
+        # --- GAME OVER SCREEN ---
+        final_elapsed = time.time() - start_time
+        
+        if final_elapsed < 1.0: 
+            final_elapsed = 1.0 # Avoid div by zero
+        
+        minutes = final_elapsed / 60.0
+        wpm = (total_chars_typed / 5.0) / minutes if minutes > 0 else 0
+        
+        print(f"\n{Fore.RED}{Style.BRIGHT}GAME OVER{Style.RESET_ALL}")
+        print(f"Final Score: {Fore.YELLOW}{score}{Style.RESET_ALL}")
+        
+        # Show Stats
+        print("-" * 30)
+        print(f"Total Words Typed: {correct_words}")
+        print(f"WPM: {Fore.CYAN}{wpm:.1f}{Style.RESET_ALL}")
+        print("-" * 30)
+        
+        update_high_score("Streak", score)
+        print()
+        
+        print(f"[{Fore.CYAN}Press ENTER for Menu{Style.RESET_ALL}] or [{Fore.CYAN}Press 'R' to Retry{Style.RESET_ALL}]")
+        cmd = input().strip().lower()
+        if cmd == 'r':
+            continue # Restart loop
+        else:
+            break # Return to menu
 
 def show_placeholder(feature_name):
     """Displays a 'Coming Soon' message."""
