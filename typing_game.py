@@ -25,10 +25,52 @@ SOUNDS = {}
 
 
 HIGHSCORE_FILE = "highscores.json"
+SETTINGS_FILE = "settings.json"
 WORD_FILE = "words.txt"
 BACKUP_WORDS = ["apple", "banana", "cherry", "date", "elderberry", "fig", "grape", "lemon", "lime", "mango"]
 
+DEFAULT_SETTINGS = {
+    "sound": True,
+    "time_limit": 30,
+    "show_timer": True
+}
+SETTINGS = {}
+
 # --- Helper Functions ---
+
+def load_settings():
+    """Loads settings from data/settings.json, creating it with defaults if missing."""
+    global SETTINGS
+    
+    # Path is inside data folder
+    file_path = os.path.join("data", SETTINGS_FILE)
+    
+    if not os.path.exists(file_path):
+        SETTINGS = DEFAULT_SETTINGS.copy()
+        save_settings(SETTINGS)
+        return
+
+    try:
+        with open(file_path, 'r') as f:
+            data = json.load(f)
+            # Merge with defaults to ensure all keys exist
+            SETTINGS = DEFAULT_SETTINGS.copy()
+            SETTINGS.update(data)
+    except (json.JSONDecodeError, IOError):
+        SETTINGS = DEFAULT_SETTINGS.copy()
+        save_settings(SETTINGS)
+
+def save_settings(new_settings):
+    """Saves the settings dict to data/settings.json."""
+    global SETTINGS
+    SETTINGS = new_settings
+    
+    file_path = os.path.join("data", SETTINGS_FILE)
+    try:
+        with open(file_path, 'w') as f:
+            json.dump(SETTINGS, f, indent=4)
+    except IOError:
+        print(f"\n{Fore.RED}Warning: Could not save settings.{Style.RESET_ALL}")
 
 def load_words(filename):
     """Loads words from data/filename, filtering invalid ones. Falls back to BACKUP_WORDS if needed."""
@@ -112,6 +154,10 @@ def init_audio():
 
 def play_sound(name):
     """Plays a sound by name if available."""
+    # Check settings first
+    if not SETTINGS.get("sound", True):
+        return
+
     if name in SOUNDS:
         try:
             SOUNDS[name].play()
@@ -340,7 +386,9 @@ def streak_mode(mode_name, word_filename):
         correct_words = 0
         combo = 0
         start_time = time.time()
-        time_limit = 30.0
+        
+        # Use settings for time limit
+        time_limit = float(SETTINGS.get("time_limit", 30))
         
         while True:
             # 1. Check time BEFORE showing word
@@ -369,9 +417,15 @@ def streak_mode(mode_name, word_filename):
             target_word = random.choice(current_words)
             
             # Construct Game Loop UI
+            # Logic for timer display
+            if SETTINGS.get("show_timer", True):
+                timer_display = f"{Fore.YELLOW}~{remaining}s{Style.RESET_ALL}"
+            else:
+                timer_display = f"{Fore.YELLOW}--{Style.RESET_ALL}"
+                
             lines = [
                 f"{Fore.CYAN}--- {mode_name.upper()} MODE ---{Style.RESET_ALL}",
-                f"SCORE: {Fore.YELLOW}{score}{Style.RESET_ALL}  |  TIME: {Fore.YELLOW}~{remaining}s{Style.RESET_ALL}  |  COMBO: {Fore.GREEN}{combo}{Style.RESET_ALL}{combo_text}",
+                f"SCORE: {Fore.YELLOW}{score}{Style.RESET_ALL}  |  TIME: {timer_display}  |  COMBO: {Fore.GREEN}{combo}{Style.RESET_ALL}{combo_text}",
                 "-" * 60,
                 "",
                 f"Word:  {Style.BRIGHT}{Fore.WHITE}{target_word}{Style.RESET_ALL}",
@@ -538,13 +592,79 @@ def play_menu():
         else:
             pass
 
-def show_placeholder(feature_name):
-    """Displays a 'Coming Soon' message."""
-    lines = [
-        f"--- {feature_name} ---",
-        "\nComing Soon!\n"
-    ]
-    draw_centered(lines, input_prompt=f"{Fore.YELLOW}Press Enter to continue...{Style.RESET_ALL}")
+def settings_menu():
+    """Menu for changing game settings."""
+    while True:
+        # Load current values from global SETTINGS
+        s_sound = "ON" if SETTINGS.get("sound", True) else "OFF"
+        s_time = SETTINGS.get("time_limit", 30)
+        s_display = "SHOW" if SETTINGS.get("show_timer", True) else "HIDE"
+        
+        # Colors for status
+        c_sound = Fore.GREEN if s_sound == "ON" else Fore.RED
+        c_display = Fore.GREEN if s_display == "SHOW" else Fore.RED
+        
+        lines = [
+            f"{Fore.CYAN}{Style.BRIGHT}=== SETTINGS ==={Style.RESET_ALL}",
+            f"1. Sound: [{c_sound}{s_sound}{Style.RESET_ALL}]",
+            f"2. Timer Length: [{Fore.YELLOW}{s_time}s{Style.RESET_ALL}]",
+            f"3. Timer Display: [{c_display}{s_display}{Style.RESET_ALL}]",
+            f"4. {Fore.RED}Reset All High Scores{Style.RESET_ALL}",
+            f"5. Back to Main Menu"
+        ]
+        
+        try:
+            choice = draw_centered(lines, input_prompt="Select an option (1-5): ").strip()
+        except (EOFError, KeyboardInterrupt):
+            break
+            
+        if choice == '1':
+            # Toggle Sound
+            SETTINGS["sound"] = not SETTINGS.get("sound", True)
+            save_settings(SETTINGS)
+            
+        elif choice == '2':
+            # Cycle Timer: 15 -> 30 -> 60 -> 120 -> 15
+            options = [15, 30, 60, 120]
+            current = SETTINGS.get("time_limit", 30)
+            try:
+                idx = options.index(current)
+                next_idx = (idx + 1) % len(options)
+                SETTINGS["time_limit"] = options[next_idx]
+            except ValueError:
+                SETTINGS["time_limit"] = 30 # Default if unknown value
+            save_settings(SETTINGS)
+            
+        elif choice == '3':
+            # Toggle Timer Display
+            SETTINGS["show_timer"] = not SETTINGS.get("show_timer", True)
+            save_settings(SETTINGS)
+            
+        elif choice == '4':
+            # Reset High Scores (Danger Zone)
+            # Clear screen and show warning
+            warning_lines = [
+                f"{Fore.RED}{Style.BRIGHT}ARE YOU SURE? THIS CANNOT BE UNDONE.{Style.RESET_ALL}",
+                "Type 'Y' or 'y' to confirm, anything else to cancel."
+            ]
+            confirm = draw_centered(warning_lines, input_prompt="Confirm Reset: ").strip().lower()
+            
+            if confirm == 'y':
+                defaults = {"Streak": {"score": 0, "name": "---"}}
+                save_high_scores(defaults)
+                # Show success
+                msg_lines = [
+                    f"{Fore.GREEN}Scores Reset!{Style.RESET_ALL}",
+                ]
+                draw_centered(msg_lines, input_prompt="Press Enter to continue...")
+            else:
+                # Cancelled
+                pass
+                
+        elif choice == '5':
+            break
+        else:
+            pass
 
 # --- Main Menu ---
 
@@ -570,7 +690,7 @@ def main_menu():
         elif choice == '2':
             show_high_scores()
         elif choice == '3':
-            show_placeholder("Settings")
+            settings_menu()
         elif choice == '4':
             print("\nThanks for playing! Goodbye.")
             break
@@ -583,7 +703,8 @@ if __name__ == "__main__":
     if not os.path.exists(HIGHSCORE_FILE):
         save_high_scores({"Streak": 0})
     
-
+    # Load settings
+    load_settings()
 
     # Clear screen immediately on launch
     organize_sound_files()
