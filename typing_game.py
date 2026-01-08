@@ -241,18 +241,41 @@ def pause():
     input(f"\n{Fore.YELLOW}Press Enter to continue...{Style.RESET_ALL}")
 
 def load_high_scores():
-    """Loads high scores from JSON, returning a dict."""
+    """Loads high scores, migrating old format {'Mode': 100} to {'Mode': {'score': 100, 'name': 'CPU'}}."""
+    defaults = {"Streak": {"score": 0, "name": "---"}}
+    
     if not os.path.exists(HIGHSCORE_FILE):
-        return {"Streak": 0}
+        return defaults
     
     try:
         with open(HIGHSCORE_FILE, 'r') as f:
             data = json.load(f)
             if not isinstance(data, dict):
-                return {"Streak": 0}
+                return defaults
+            
+            # Check for migration needs
+            migrated = False
+            new_data = {}
+            
+            for k, v in data.items():
+                if isinstance(v, int):
+                    # Old format detected
+                    new_data[k] = {"score": v, "name": "CPU"}
+                    migrated = True
+                elif isinstance(v, dict) and "score" in v:
+                    # New format (basic check)
+                    new_data[k] = v
+                else:
+                     new_data[k] = {"score": 0, "name": "---"}
+            
+            if migrated:
+                print(f"{Fore.YELLOW}Migrated high scores to new format...{Style.RESET_ALL}")
+                save_high_scores(new_data)
+                return new_data
+            
             return data
     except (json.JSONDecodeError, IOError):
-        return {"Streak": 0}
+        return defaults
 
 def save_high_scores(scores):
     """Saves the high score dict to JSON."""
@@ -262,30 +285,41 @@ def save_high_scores(scores):
     except IOError:
         print("\nWarning: Could not save high scores.")
 
-def check_high_score(mode_name, score):
-    """Updates the high score for a given mode if the new score is higher. Returns a message string."""
+def get_high_score_data(mode_name):
+    """Returns the high score dict {'score': X, 'name': 'Y'} for a mode."""
     scores = load_high_scores()
-    current_best = scores.get(mode_name, 0)
-    
-    if score > current_best:
-        scores[mode_name] = score
-        save_high_scores(scores)
-        return f"{Fore.GREEN}{Style.BRIGHT}NEW HIGH SCORE for {mode_name}: {score}!{Style.RESET_ALL}"
-    else:
-        return f"{Fore.CYAN}High Score for {mode_name}: {current_best}{Style.RESET_ALL}"
+    return scores.get(mode_name, {"score": 0, "name": "---"})
 
 def show_high_scores():
-    """Displays all high scores."""
-    lines = [f"{Fore.CYAN}{Style.BRIGHT}--- HIGH SCORES ---{Style.RESET_ALL}"]
+    """Displays high scores in a formatted Hall of Fame table."""
     scores = load_high_scores()
     
-    if not scores:
-        lines.append("No scores recording yet.")
-    else:
-        for mode, score in scores.items():
-            lines.append(f"{mode}: {Fore.YELLOW}{score}{Style.RESET_ALL}")
+    lines = [
+        f"{Fore.CYAN}{Style.BRIGHT}=== HALL OF FAME ==={Style.RESET_ALL}",
+        ""
+    ]
     
-    lines.append("-" * 20)
+    # Table Header
+    # MODE (15) | SCORE (8) | HELD BY
+    header = f"{Fore.WHITE}{Style.BRIGHT}{'MODE':<15} {'SCORE':<8} {'HELD BY'}{Style.RESET_ALL}"
+    lines.append(header)
+    lines.append("-" * 35)
+    
+    if not scores:
+        lines.append("No scores recorded yet.")
+    else:
+        for mode in sorted(scores.keys()):
+            entry = scores[mode]
+            s_val = entry.get('score', 0)
+            s_name = entry.get('name', '---')
+            
+            # Format row
+            # Use yellow for score to make it pop
+            row = f"{Fore.CYAN}{mode:<15}{Style.RESET_ALL} {Fore.YELLOW}{s_val:<8}{Style.RESET_ALL} {Fore.MAGENTA}{s_name}{Style.RESET_ALL}"
+            lines.append(row)
+    
+    lines.append("")
+    lines.append("-" * 35)
     
     draw_centered(lines, input_prompt=f"{Fore.YELLOW}Press Enter to continue...{Style.RESET_ALL}")
 
@@ -415,15 +449,61 @@ def streak_mode(mode_name, word_filename):
         ]
         
 
-        hs_message = check_high_score(mode_name, score) # Renamed or new helper?
-        if hs_message:
-            lines.insert(2, hs_message) # Insert after GAME OVER?
+        # Check High Score
+        hs_data = get_high_score_data(mode_name)
+        current_best = hs_data.get('score', 0)
+        is_new_record = score > current_best
+        
+        if is_new_record:
+            play_sound("levelup")
+            lines.insert(2, f"{Fore.GREEN}🚨 NEW HIGH SCORE! 🚨{Style.RESET_ALL}")
             
-        cmd = draw_centered(lines, input_prompt="").strip().lower()
-        if cmd == 'r':
-            continue # Restart loop
+            # Prompt for name
+            prompt_line = f"Enter initials (3 chars): "
+            
+            while True:
+                name_input = draw_centered(lines, input_prompt=prompt_line).strip().upper()
+                if len(name_input) > 3:
+                     name_input = name_input[:3]
+                
+                if name_input:
+                    # Save it
+                    all_scores = load_high_scores()
+                    all_scores[mode_name] = {'score': score, 'name': name_input}
+                    save_high_scores(all_scores)
+                    
+                    lines.append(f"{Fore.GREEN}Score Saved! {name_input} - {score}{Style.RESET_ALL}")
+                    break
+                else:
+                    # Force default
+                    name_input = 'UNK'
+                    all_scores = load_high_scores()
+                    all_scores[mode_name] = {'score': score, 'name': name_input}
+                    save_high_scores(all_scores)
+                    lines.append(f"{Fore.GREEN}Score Saved! {name_input} - {score}{Style.RESET_ALL}")
+                    break
+
+            lines.append("")
+            lines.append(f"[{Fore.CYAN}Press ENTER for Menu{Style.RESET_ALL}] or [{Fore.CYAN}Press 'R' to Retry{Style.RESET_ALL}]")
+             
+            cmd = draw_centered(lines, input_prompt="").strip().lower()
+            if cmd == 'r':
+                continue
+            else:
+                break
+            
         else:
-            break # Return to menu
+            # Not a high score
+            hs_msg = f"{Fore.CYAN}High Score: {current_best} ({hs_data.get('name', '---')}){Style.RESET_ALL}"
+            lines.insert(7, hs_msg)
+            
+            lines.append(f"[{Fore.CYAN}Press ENTER for Menu{Style.RESET_ALL}] or [{Fore.CYAN}Press 'R' to Retry{Style.RESET_ALL}]")
+            
+            cmd = draw_centered(lines, input_prompt="").strip().lower()
+            if cmd == 'r':
+                continue # Restart loop
+            else:
+                break # Return to menu
 
 def play_menu():
     """Submenu for selecting a game mode."""
