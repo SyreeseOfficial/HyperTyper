@@ -17,11 +17,11 @@ BACKUP_WORDS = ["apple", "banana", "cherry", "date", "elderberry", "fig", "grape
 
 # --- Helper Functions ---
 
-def load_words():
-    """Loads words from data/WORD_FILE, filtering invalid ones. Falls back to BACKUP_WORDS if needed."""
+def load_words(filename):
+    """Loads words from data/filename, filtering invalid ones. Falls back to BACKUP_WORDS if needed."""
     words = []
-    # Look for words.txt inside the 'data' folder
-    file_path = os.path.join("data", WORD_FILE)
+    # Look for filename inside the 'data' folder
+    file_path = os.path.join("data", filename)
     
     if os.path.exists(file_path):
         try:
@@ -40,7 +40,7 @@ def load_words():
     
     return words
 
-WORDS = load_words()
+
 
 def clear_screen():
     """Clears the terminal screen."""
@@ -117,8 +117,12 @@ def show_high_scores():
 
 # --- Game Modes ---
 
-def streak_mode():
+def streak_mode(mode_name, word_filename):
     """Runs the Streak Mode game loop with a 30s global timer and game feel."""
+    
+    # Load words for this mode
+    current_words = load_words(word_filename)
+    
     while True:
         # Countdown
         countdown()
@@ -138,12 +142,12 @@ def streak_mode():
             remaining = max(0, int(time_limit - elapsed))
             
             clear_screen()
-            print(f"{Fore.CYAN}--- STREAK MODE ---{Style.RESET_ALL}")
+            print(f"{Fore.CYAN}--- {mode_name.upper()} MODE ---{Style.RESET_ALL}")
             print(f"CURRENT SCORE: {Fore.YELLOW}{score}{Style.RESET_ALL}   |   TIME LEFT: {Fore.YELLOW}~{remaining}s{Style.RESET_ALL}")
             print("-" * 40)
             print()
             
-            target_word = random.choice(WORDS)
+            target_word = random.choice(current_words)
             print(f"Word:  {Style.BRIGHT}{Fore.WHITE}{target_word}{Style.RESET_ALL}")
             print()
             
@@ -189,7 +193,7 @@ def streak_mode():
         print(f"WPM: {Fore.CYAN}{wpm:.1f}{Style.RESET_ALL}")
         print("-" * 30)
         
-        update_high_score("Streak", score)
+        update_high_score(mode_name, score) # Pass dynamic mode name
         print()
         
         print(f"[{Fore.CYAN}Press ENTER for Menu{Style.RESET_ALL}] or [{Fore.CYAN}Press 'R' to Retry{Style.RESET_ALL}]")
@@ -198,6 +202,39 @@ def streak_mode():
             continue # Restart loop
         else:
             break # Return to menu
+
+def play_menu():
+    """Submenu for selecting a game mode."""
+    while True:
+        clear_screen()
+        print(f"{Fore.CYAN}{Style.BRIGHT}--- SELECT CATEGORY ---{Style.RESET_ALL}")
+        print(f"{Fore.CYAN}1. Standard Streak{Style.RESET_ALL}")
+        print(f"{Fore.CYAN}2. Capital Cities{Style.RESET_ALL}")
+        print(f"{Fore.CYAN}3. Foods{Style.RESET_ALL}")
+        print(f"{Fore.CYAN}4. Animals{Style.RESET_ALL}")
+        print(f"{Fore.CYAN}5. Lorem Ipsum{Style.RESET_ALL}")
+        print(f"{Fore.CYAN}6. Back to Main Menu{Style.RESET_ALL}")
+        print()
+        
+        try:
+            choice = input("Select an option (1-6): ").strip()
+        except (EOFError, KeyboardInterrupt):
+            break
+
+        if choice == '1':
+            streak_mode("Streak", "words.txt")
+        elif choice == '2':
+            streak_mode("Capitals", "capitals.txt")
+        elif choice == '3':
+            streak_mode("Foods", "foods.txt")
+        elif choice == '4':
+            streak_mode("Animals", "animals.txt")
+        elif choice == '5':
+            streak_mode("Lorem", "lorem.txt")
+        elif choice == '6':
+            break
+        else:
+            pass
 
 def show_placeholder(feature_name):
     """Displays a 'Coming Soon' message."""
@@ -226,7 +263,7 @@ def main_menu():
             break
 
         if choice == '1':
-            streak_mode()
+            play_menu()
         elif choice == '2':
             show_high_scores()
         elif choice == '3':
