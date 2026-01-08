@@ -610,7 +610,7 @@ def play_menu():
         elif choice == '8':
             streak_mode("Brainrot", "brainrot.txt", exact_match=True)
         elif choice == '9':
-            streak_mode("UwU", "uwu.txt")
+            streak_mode("UwU", "uwu.txt", exact_match=True)
         elif choice == '10':
             streak_mode("LinkedIn Jargon", "linkedin.txt", exact_match=True)
         elif choice == '11':
