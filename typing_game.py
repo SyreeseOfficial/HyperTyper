@@ -580,11 +580,16 @@ def play_menu():
             f"{Fore.CYAN}5. Lorem Ipsum{Style.RESET_ALL}",
             f"{Fore.CYAN}6. Code Master (Python){Style.RESET_ALL}",
             f"{Fore.CYAN}7. Terminal (Linux/Bash){Style.RESET_ALL}",
-            f"{Fore.CYAN}8. Back to Main Menu{Style.RESET_ALL}"
+            f"{Fore.CYAN}8. Brainrot (Gen Z){Style.RESET_ALL}",
+            f"{Fore.CYAN}9. Uwu (Cursed){Style.RESET_ALL}",
+            f"{Fore.CYAN}10. Linkedin (Corporate){Style.RESET_ALL}",
+            f"{Fore.CYAN}11. Spanish (Language){Style.RESET_ALL}",
+            f"{Fore.CYAN}12. Pokemon (Gen 1){Style.RESET_ALL}",
+            f"{Fore.CYAN}13. Back to Main Menu{Style.RESET_ALL}"
         ]
         
         try:
-            choice = draw_centered(lines, input_prompt="Select an option (1-8): ").strip()
+            choice = draw_centered(lines, input_prompt="Select an option (1-13): ").strip()
         except (EOFError, KeyboardInterrupt):
             break
 
@@ -603,6 +608,16 @@ def play_menu():
         elif choice == '7':
             streak_mode("Terminal", "terminal.txt", exact_match=True)
         elif choice == '8':
+            streak_mode("Brainrot", "brainrot.txt")
+        elif choice == '9':
+            streak_mode("Uwu", "uwu.txt")
+        elif choice == '10':
+            streak_mode("Linkedin", "linkedin.txt")
+        elif choice == '11':
+            streak_mode("Spanish", "spanish.txt")
+        elif choice == '12':
+            streak_mode("Pokemon", "pokemon.txt")
+        elif choice == '13':
             break
         else:
             pass
