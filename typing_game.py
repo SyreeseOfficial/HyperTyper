@@ -8,30 +8,31 @@ import json
 # --- Configuration & Data ---
 
 HIGHSCORE_FILE = "highscores.json"
-WORDS = [
-    "apple", "banana", "cherry", "date", "elderberry",
-    "fig", "grape", "honeydew", "kiwi", "lemon",
-    "mango", "nectarine", "orange", "papaya", "quince",
-    "raspberry", "strawberry", "tangerine", "ugli", "vanilla",
-    "watermelon", "xigua", "yam", "zucchini", "avocado",
-    "blueberry", "cantaloupe", "durian", "eggplant", "fennel",
-    "guava", "huckleberry", "jackfruit", "kumquat", "lime",
-    "mulberry", "nutmeg", "olive", "peach", "quinoa",
-    "radish", "spinach", "tomato", "umbrella", "violet",
-    "waffle", "xylophone", "yogurt", "zebra", "asteroid",
-    "galaxy", "nebula", "planet", "comet", "meteor",
-    "satellite", "telescope", "universe", "astronaut", "spaceship",
-    "adventure", "bicycle", "camera", "diamond", "elephant",
-    "festival", "garden", "history", "island", "jungle",
-    "kangaroo", "lantern", "mountain", "notebook", "ocean",
-    "penguin", "question", "rainbow", "sunflower", "treasure",
-    "unicorn", "volcano", "waterfall", "xenon", "yellow",
-    "zeppelin", "architect", "biologist", "chemist", "dentist",
-    "engineer", "farmer", "geologist", "historian", "inventor",
-    "journalist", "librarian", "musician", "nurse", "optician"
-]
-
+WORD_FILE = "words.txt"
+BACKUP_WORDS = ["apple", "banana", "cherry", "date", "elderberry", "fig", "grape", "lemon", "lime", "mango"]
 # --- Helper Functions ---
+
+def load_words():
+    """Loads words from WORD_FILE, filtering invalid ones. Falls back to BACKUP_WORDS if needed."""
+    words = []
+    if os.path.exists(WORD_FILE):
+        try:
+            with open(WORD_FILE, 'r') as f:
+                for line in f:
+                    w = line.strip().lower()
+                    if len(w) >= 3 and w.isalpha():
+                        words.append(w)
+        except IOError:
+            pass # Keep list empty to trigger backup
+
+    if not words:
+        print(f"Warning: {WORD_FILE} not found or empty, using backup list.")
+        time.sleep(2) # Give user a chance to see the warning
+        return BACKUP_WORDS
+    
+    return words
+
+WORDS = load_words()
 
 def clear_screen():
     """Clears the terminal screen."""
@@ -196,6 +197,8 @@ if __name__ == "__main__":
     # Ensure highscore file exists
     if not os.path.exists(HIGHSCORE_FILE):
         save_high_scores({"Streak": 0})
+    
+
 
     # Clear screen immediately on launch
     clear_screen()
