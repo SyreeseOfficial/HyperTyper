@@ -6,7 +6,17 @@ import time
 import json
 import shutil
 import re
+import select
+import unicodedata
+import contextlib
 from colorama import Fore, Back, Style, init
+
+try:
+    import termios, tty
+    msvcrt = None
+except ImportError:  # Windows
+    import msvcrt
+    termios = None
 
 # Initialize colorama
 init(autoreset=True)
@@ -205,7 +215,8 @@ def play_sound(name):
 def get_visible_length(s):
     """Returns the length of the string without ANSI color codes."""
     ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
-    return len(ansi_escape.sub('', s))
+    # East Asian Wide/Fullwidth chars (incl. emoji) take 2 terminal columns
+    return sum(2 if unicodedata.east_asian_width(c) in 'WF' else 1 for c in ansi_escape.sub('', s))
 
 def get_combo_tier(combo):
     """
@@ -231,11 +242,83 @@ def get_combo_tier(combo):
     else:
         return "", 1.0, ""
 
-def draw_centered(lines, input_prompt=None):
+def flush_input():
+    """Discards keys typed ahead (e.g. during the countdown) so they don't become the next answer."""
+    if not sys.stdin.isatty():
+        return
+    if termios:
+        termios.tcflush(sys.stdin, termios.TCIFLUSH)
+    else:
+        while msvcrt.kbhit():
+            msvcrt.getwch()
+
+def read_key():
+    """Reads one keypress without waiting for Enter. Returns '' for keys we ignore (arrows etc.)."""
+    if msvcrt:
+        ch = msvcrt.getwch()
+        if ch in ("\x00", "\xe0"):  # arrow/function key: swallow its second code
+            msvcrt.getwch()
+            return ""
+        return ch
+    fd = sys.stdin.fileno()
+    b = os.read(fd, 1)
+    if not b:
+        raise EOFError
+    if b == b"\x1b":  # escape sequence (arrows etc.): swallow it
+        while select.select([fd], [], [], 0.02)[0]:
+            os.read(fd, 8)
+        return ""
+    extra = 0 if b[0] < 0xC0 else 1 if b[0] < 0xE0 else 2 if b[0] < 0xF0 else 3  # UTF-8 continuation bytes
+    return (b + os.read(fd, extra) if extra else b).decode("utf-8", "ignore")
+
+@contextlib.contextmanager
+def cbreak_mode():
+    """Unbuffered, no-echo stdin for the duration of the block (Ctrl-C still works). No-op on Windows."""
+    if termios is None:
+        yield
+        return
+    fd = sys.stdin.fileno()
+    old = termios.tcgetattr(fd)
+    try:
+        tty.setcbreak(fd)
+        yield
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old)
+
+def read_typed(prompt, target, cols):
+    """Reads an answer key by key, echoing each char green if it matches target[i], red if not."""
+    if not sys.stdin.isatty():
+        return input("")
+    maxlen = len(target) + 10  # ponytail: extra keys past this are ignored; keeps the line from wrapping
+    pad = " " * max(0, (cols - get_visible_length(prompt) - maxlen) // 2)
+    buf = ""
+    with cbreak_mode():
+        while True:
+            typed = "".join(
+                (Fore.GREEN if i < len(target) and c == target[i] else Fore.RED) + c
+                for i, c in enumerate(buf))
+            sys.stdout.write(f"\r{pad}{prompt}{typed}{Style.RESET_ALL}\033[K")
+            sys.stdout.flush()
+            ch = read_key()
+            if ch in ("\r", "\n"):
+                break
+            if ch in ("\x7f", "\x08"):
+                buf = buf[:-1]
+            elif ch == "\x03":  # Ctrl-C (only arrives raw on Windows)
+                raise KeyboardInterrupt
+            elif ch == "\x04":
+                raise EOFError
+            elif ch.isprintable() and len(buf) < maxlen:
+                buf += ch
+    print()
+    return buf
+
+def draw_centered(lines, input_prompt=None, target=None):
     """
     Clears screen and draws the list of 'lines' centered vertically and horizontally.
     If input_prompt is provided, it is printed centered below the lines,
-    and the function returns the user input.
+    and the function returns the user input. If target is also given, the input is
+    read key by key and colored against target (see read_typed).
     """
     clear_screen()
     
@@ -267,6 +350,10 @@ def draw_centered(lines, input_prompt=None):
         vis_len = get_visible_length(input_prompt)
         left_padding = max(0, (cols - vis_len) // 2)
         
+        flush_input()
+        if target is not None:
+            return read_typed(input_prompt, target, cols)
+
         # Print prompt with padding, no newline at end so cursor stays there
         print(" " * left_padding + input_prompt, end='')
         return input("")
@@ -382,10 +469,10 @@ def show_high_scores():
     ]
     
     # Table Header
-    # MODE (15) | SCORE (8) | HELD BY
-    header = f"{Fore.WHITE}{Style.BRIGHT}{'MODE':<15} {'SCORE':<8} {'HELD BY'}{Style.RESET_ALL}"
+    # MODE (24) | SCORE (8) | HELD BY
+    header = f"{Fore.WHITE}{Style.BRIGHT}{'MODE':<24} {'SCORE':<8} {'HELD BY'}{Style.RESET_ALL}"
     lines.append(header)
-    lines.append("-" * 35)
+    lines.append("-" * 45)
     
     if not scores:
         lines.append("No scores recorded yet.")
@@ -397,11 +484,11 @@ def show_high_scores():
             
             # Format row
             # Use yellow for score to make it pop
-            row = f"{Fore.CYAN}{mode:<15}{Style.RESET_ALL} {Fore.YELLOW}{s_val:<8}{Style.RESET_ALL} {Fore.MAGENTA}{s_name}{Style.RESET_ALL}"
+            row = f"{Fore.CYAN}{mode:<24}{Style.RESET_ALL} {Fore.YELLOW}{s_val:<8}{Style.RESET_ALL} {Fore.MAGENTA}{s_name}{Style.RESET_ALL}"
             lines.append(row)
     
     lines.append("")
-    lines.append("-" * 35)
+    lines.append("-" * 45)
     
     draw_centered(lines, input_prompt=f"{Fore.YELLOW}Press Enter to continue...{Style.RESET_ALL}")
 
@@ -418,13 +505,16 @@ def streak_mode(mode_name, word_filename, exact_match=False):
         countdown()
         
         score = 0
-        total_chars_typed = 0
+        total_chars_typed = 0  # chars in correct words only
+        raw_chars = 0  # chars in every submitted answer, right or wrong
         correct_words = 0
         combo = 0
+        wrong_msg = None
         start_time = time.time()
-        
+
         # Use settings for time limit
         time_limit = float(SETTINGS.get("time_limit", 30))
+        score_key = f"{mode_name}@{int(time_limit)}s"  # records are per mode AND timer length
         
         while True:
             # 1. Check time BEFORE showing word
@@ -469,7 +559,7 @@ def streak_mode(mode_name, word_filename, exact_match=False):
             ]
             
             try:
-                user_input = draw_centered(lines, input_prompt="Type it: ").strip()
+                user_input = draw_centered(lines, input_prompt="Type it: ", target=target_word).strip()
             except (EOFError, KeyboardInterrupt):
                 return
 
@@ -478,6 +568,8 @@ def streak_mode(mode_name, word_filename, exact_match=False):
             if elapsed >= time_limit:
                 play_sound("victory")
                 break # Go to Game Over logic
+
+            raw_chars += len(user_input)
 
             # 3. Sudden Death Check
             if user_input == target_word:
@@ -505,16 +597,9 @@ def streak_mode(mode_name, word_filename, exact_match=False):
                 time.sleep(0.2)
             else:
                 combo = 0 # Reset combo on mistake (though game ends here anyway)
-                
+
                 play_sound("gameover")
-                
-                # Fail Message - Centered manually
-                msg = f"{Fore.RED}Wrong! You typed '{user_input}', expected '{target_word}'.{Style.RESET_ALL}"
-                cols, _ = shutil.get_terminal_size()
-                vis_len = get_visible_length(msg)
-                padding = max(0, (cols - vis_len) // 2)
-                print()
-                print(" " * padding + msg)
+                wrong_msg = f"{Fore.RED}You typed '{user_input}', expected '{target_word}'{Style.RESET_ALL}"
                 break # Go to Game Over logic
 
         # --- GAME OVER SCREEN ---
@@ -524,15 +609,19 @@ def streak_mode(mode_name, word_filename, exact_match=False):
             final_elapsed = 1.0 # Avoid div by zero
         
         minutes = final_elapsed / 60.0
+        # WPM = chars / 5 / minutes over the full run. Net counts correct words only; raw counts every submission.
         wpm = (total_chars_typed / 5.0) / minutes if minutes > 0 else 0
+        raw_wpm = (raw_chars / 5.0) / minutes if minutes > 0 else 0
         
+        extra = [wrong_msg] if wrong_msg else []  # shifts the insert() indices below
         lines = [
             "",
             f"{Fore.RED}{Style.BRIGHT}GAME OVER{Style.RESET_ALL}",
+            *extra,
             f"Final Score: {Fore.YELLOW}{score}{Style.RESET_ALL}",
             "-" * 30,
             f"Total Words Typed: {correct_words}",
-            f"WPM: {Fore.CYAN}{wpm:.1f}{Style.RESET_ALL}",
+            f"WPM: {Fore.CYAN}{wpm:.1f}{Style.RESET_ALL} (raw {raw_wpm:.1f})",
             "-" * 30,
             "",
             f"[{Fore.CYAN}Press ENTER for Menu{Style.RESET_ALL}] or [{Fore.CYAN}Press 'R' to Retry{Style.RESET_ALL}]"
@@ -540,7 +629,7 @@ def streak_mode(mode_name, word_filename, exact_match=False):
         
 
         # Check High Score
-        hs_data = get_high_score_data(mode_name)
+        hs_data = get_high_score_data(score_key)
         current_best = hs_data.get('score', 0)
         is_new_record = score > current_best
         
@@ -559,7 +648,7 @@ def streak_mode(mode_name, word_filename, exact_match=False):
                 if name_input:
                     # Save it
                     all_scores = load_high_scores()
-                    all_scores[mode_name] = {'score': score, 'name': name_input}
+                    all_scores[score_key] = {'score': score, 'name': name_input}
                     save_high_scores(all_scores)
                     
                     lines.append(f"{Fore.GREEN}Score Saved! {name_input} - {score}{Style.RESET_ALL}")
@@ -568,7 +657,7 @@ def streak_mode(mode_name, word_filename, exact_match=False):
                     # Force default
                     name_input = 'UNK'
                     all_scores = load_high_scores()
-                    all_scores[mode_name] = {'score': score, 'name': name_input}
+                    all_scores[score_key] = {'score': score, 'name': name_input}
                     save_high_scores(all_scores)
                     lines.append(f"{Fore.GREEN}Score Saved! {name_input} - {score}{Style.RESET_ALL}")
                     break
@@ -585,7 +674,7 @@ def streak_mode(mode_name, word_filename, exact_match=False):
         else:
             # Not a high score
             hs_msg = f"{Fore.CYAN}High Score: {current_best} ({hs_data.get('name', '---')}){Style.RESET_ALL}"
-            lines.insert(7, hs_msg)
+            lines.insert(7 + len(extra), hs_msg)
             
             lines.append(f"[{Fore.CYAN}Press ENTER for Menu{Style.RESET_ALL}] or [{Fore.CYAN}Press 'R' to Retry{Style.RESET_ALL}]")
             
@@ -758,7 +847,7 @@ def main_menu():
 if __name__ == "__main__":
     # Ensure highscore file exists
     if not os.path.exists(HIGHSCORE_FILE):
-        save_high_scores({"Streak": 0})
+        save_high_scores({})
     
     # Load settings
     load_settings()
@@ -766,9 +855,9 @@ if __name__ == "__main__":
     # Clear screen immediately on launch
     organize_sound_files()
     init_audio()
-    splash_screen()
     try:
+        splash_screen()
         main_menu()
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, EOFError):  # Ctrl-C / Ctrl-D at any prompt
         print("\n\nGame Interrupted. Bye!")
         sys.exit(0)
