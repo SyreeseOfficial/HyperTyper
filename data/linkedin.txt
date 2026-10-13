@@ -457,7 +457,6 @@ Student
 Lover
 Fighter
 Survivor
-Winner
 Looser
 Wait no
 Winner always
@@ -486,7 +485,6 @@ Repeat
 Routine
 Consistency
 Discipline
-Success
 Freedom
 Wealth
 Health
@@ -505,7 +503,6 @@ Sarcastic
 LinkedIn Jargon
 Perfect
 Done
-Now
 Update
 Save
 Push
@@ -515,69 +512,28 @@ Antigravity
 Syreese
 Typing Game
 Victory
-Success
-Impact
 Grateful
 Humbled
 Honored
 Thrilled
 Excited
-Stay tuned
 Link in bio
-Agree?
-Thoughts?
 Comment for reach
 Visibility
 Algorithm
 Engagement
 Reach
-Growth
 Synergy
 Alignment
-Circle back
-Deep dive
-Touch base
 Bandwidth
-Low-hanging fruit
-Paradigm shift
 Scalable
 Holistic
-Value-add
-Growth hacking
-Pivot
-Take it offline
-Hard stop
-Deliverables
 Omnichannel
-Personal branding
-Core competency
-Best-in-class
-Mission-critical
-Boil the ocean
-Drink the Kool-Aid
-Eating our own dog food
-Run it up the flagpole
 Wheelhouse
 Actionable
-Bleeding edge
-Game changer
-Level set
-Think outside the box
-Well-oiled machine
-Work-life balance
-Hustle culture
-Quiet quitting
 Over-index
-Career pivot
-Open to work
-Agree?
-Thoughts?
-Building in public
-Daily grind
-Monday motivation
 Authentic
 Top Voice
-Content is king
 Viral
 Unicorn
 10x
@@ -585,101 +541,39 @@ Series A
 Exit
 Disruptive
 Customer centric
-Human capital
 Employer brand
-Culture fit
 DEI
-Remote-first
 Hybrid
-Zoom fatigue
-Slack me
-Ping me
 Epics
-Technical debt
-Refactoring
-Cloud-native
-Serverless
-Generative AI
-Prompt engineering
 Web3
 Blockchain
 Metaverse
-Digital transformation
 IoT
-Sustainability
-Carbon neutral
 ESG
-Purpose-driven
-Community manager
-Content creator
-Influencer
-Engagement
 SEO
-Growth mindset
-Continuous learning
-Upskilling
-Reskilling
-Lifelong learner
-Networking
-Coffee chat
-Informational interview
-Side hustle
-Passive income
-Financial freedom
-Digital nomad
-Laptop lifestyle
-Solopreneur
-Intrapreneurship
 Coaching
-Venture capital
-Angel investor
-Bootstrapping
-Crowdfunding
-Pitch deck
-Storytelling
 Data-driven
-Business intelligence
 Analytics
-Customer journey
-Design thinking
-Lean startup
 Agile
 Kanban
 Scrum
 Product-led
-Engineering manager
-Stealth mode
-Launch day
-Demo day
 Learning curve
 Fast-paced
-Growth opportunities
 Salary
 Benefits
 PTO
-Free snacks
 Ping pong
-Open office
-Gig economy
 Leadership
 Vulnerable
 Self-care
 Midnight oil
-Crunch time
 Sprint
 Milestone
-Success
-Goal setting
 Productivity
-Deep work
-Flow state
-Atomic habits
-Morning routine
 Execution
- Excellence
 Commitment
 Quality
-Customer success
 User testing
 Feedback
 Iteration
@@ -691,25 +585,15 @@ Security
 Privacy
 Compliance
 Ethics
-Transparency
-Accountability
-Ownership
-Team player
 Dynamic
-Dream team
 Work smarter
-Thinking cap
 Lightbulb
-Raising the bar
-Next level
-Game plan
 Strategy
 Tactical
 Operational
 Logistics
 Procurement
 Vendor
-Partner
 Client
 Customer
 User
@@ -720,11 +604,9 @@ Sector
 Vertical
 Competitor
 Landscape
-Benchmarking
 SWOT
 PESTLE
 Disruption
-Innovation
 Transformation
 Digital
 Lean
@@ -737,205 +619,50 @@ Advisory
 Services
 Solutions
 Products
-Future of work
-Moving the needle
 Double click
 Net-net
-Herding cats
-Put a pin in it
 Radar
 Table this
-Reach out
-Sync up
-Over the line
-Under the hood
-Bottom line
-At the end of the day
-Going forward
-Big picture
 Plate
 Hit the ground
 Loop
 Same page
-State of the art
-Cutting edge
-Outside the box
 Drawing board
 Win-win
 Learnings
-Agile transformation
-Digital native
-Thought partner
-Knowledge sharing
-Best practices
-Core values
-Empowerment
-Collaboration
-Communication
-Innovation
-Excellence
-Integrity
-Transparency
-Accountability
-Ownership
-Team player
-Dynamic
-Dream team
-Work smarter
-Thinking cap
-Lightbulb
 Bar
-Next level
-Game plan
-Strategy
-Tactical
 Operations
-Logistics
-Procurement
-Vendor
-Partner
-Client
-Customer
-Success
-User-centric
-Design-led
-Data-informed
-Evidence-based
-Results-oriented
-Standardizing
-Benchmarking
 SOP
-Onboarding
-Offboarding
 Retention
 Pipeline
-Skill gap
 Workforce
-Digital literacy
-Soft skills
 EQ
-Self-awareness
-Social proof
-Testimonials
-Case studies
-Success stories
-White papers
-Webinars
-Podcasts
-Newsletters
-Subscriptions
 Freemium
-SaaS
-PaaS
-IaaS
-Cloud migration
-Zero trust
 Cybersecurity
-Risk mitigation
-Compliance
 Audit
 Governance
 Roadmap
-Milestone
-Quality
-Feedback
-Growth
 Scaling
-Market
 Brand
 Awareness
 Loyalty
-Word of mouth
-Advocacy
 Referral
 Lead
 Funnel
 Conversion
-High-ticket
 Consultative
-B2B
-B2C
-D2C
-Marketplace
 Platform
 Sharing
-Sustainability
 CSR
-DEI
 Equity
-Psychological safety
 Trajectory
 Potential
 Performer
-Rockstar
-Ninja
-Guru
-Wizard
-Evangelist
-Ambassador
-Influencer
-thoughtleader
-impactful
-iterate
-kpi
-optimize
-pivot
-robust
-vision
-winwin
-workflow
-agile
-scrum
-sprint
-cloud
-microservices
-devops
-automation
-ai
-blockchain
-crypto
-nft
-web3
-metaverse
-roadmap
-milestone
-mvp
-prototype
-wireframe
-ux
-ui
-brand
-revenue
-growth
-profit
-roi
-funnel
-compliance
-strategy
-logistics
-innovation
-disruption
-transformation
-digital
-lean
-kaizen
-consulting
-advisory
-solutions
-products
 Opportunities
 Dream job
 Promotion
-Answering the call
-Unlocking potential
-Navigating change
-Driving results
 Silos
-Fostering innovation
-Cultivating culture
 Bridges
-Impact
-Future
 Possible
 Disrupting
 Satus quo
@@ -943,110 +670,20 @@ Boundaries
 Standard
 Example
 Waves
-Legacy
 Journey
 Upwards
 Stay humble
-Dream big
 Happen
-Excellence
-Quality
-Customer first
-People first
-Planet first
-Next-gen
 Stack
-Full-stack human
 Curiosity
-Growth always
-Learning machine
-Thinker
-Doer
-Achiever
-Winner
-Champion
-Leader
-Partner
-Ally
-Friend
-Connection
-Network
-Community
-Family
-Office
-Life
-Work
-Balance
-Harmony
-Success
-Failure
-Growth
-Learning
-Love
-Passion
-Purpose
-Impact
-Meaning
-Legacy
-Future
-History
-Now
-Today
-Tomorrow
-Always
-Infinite
-Boundless
-Unstoppable
-Relentless
-Fearless
-Limitless
-Powerful
-Strong
-Bold
-Creative
-Inspired
-Motivated
-Driven
-Ambitious
-Successful
-Iconic
-Legendary
-Master
-Pro
-Expert
-Specialist
-Consultant
-Advisor
-Coach
-Mentor
-Teacher
-Student
-Lover
-Fighter
-Survivor
-Winner
 Wait
-Winner
-Success
 Fast
 Forward
-Lean into it
-Lean out
-Lean in
-Lean forward
-Lean back
-Now
-Done
-LinkedIn
-Jargon
 Goodbye
 Hello
-Syreese
-Antigravity
 2026
 The Future
 Is
-Now
 Ready
 Set
 Type

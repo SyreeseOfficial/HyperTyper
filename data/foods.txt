@@ -199,7 +199,6 @@ Miso
 Udon
 Soba
 Katsu
-Curry
 Pad Thai
 Satay
 Laksa
@@ -234,19 +233,9 @@ Meatloaf
 Casserole
 Pot Roast
 Stew
-Chili
-Nachos
 Tostadas
 Taco
-Burrito
-Quesadilla
-Enchilada
-Fajita
-Salsa
-Guacamole
-Chips
 Beans
-Rice
 Tortilla
 Sopapilla
 Churro

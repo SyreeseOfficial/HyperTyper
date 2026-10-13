@@ -197,7 +197,6 @@ Raccoon
 Coati
 Kinkajou
 Red Panda
-Bear
 Polar Bear
 Brown Bear
 Black Bear
@@ -206,26 +205,20 @@ Sun Bear
 Sloth Bear
 Spectacled Bear
 Giant Panda
-Hyena
 Aardwolf
-Seal
 Sea Lion
 Fur Seal
 Elephant Seal
 Manatee
 Dugong
-Whale
 Blue Whale
 Humpback
 Orca
 Sperm Whale
 Narwhal
 Beluga
-Dolphin
 Bottlenose
 Spinner
-Porpoise
-Shark
 Great White
 Tiger Shark
 Hammerhead
@@ -239,9 +232,6 @@ Barracuda
 Marlin
 Swordfish
 Sailfish
-Tuna
-Salmon
-Trout
 Bass
 Perch
 Carp
@@ -254,57 +244,33 @@ Clownfish
 Seahorse
 Seadragon
 Pipefish
-Octopus
-Squid
 Cuttlefish
 Nautilus
-Snail
-Slug
 Clam
 Oyster
 Mussel
 Scallop
-Crab
-Lobster
 Crayfish
-Shrimp
-Krill
 Barnacle
-Spider
 Tarantula
 Widow
 Recluse
-Scorpion
 Centipede
 Millipede
 Insect
-Beetle
 Ladybug
 Firefly
 Weevil
-Butterfly
-Moth
 Skipper
-Dragonfly
 Damselfly
 Mayfly
 Stonefly
 Caddisfly
-Fly
-Mosquito
-Gnat
 Midges
-Bee
-Wasp
-Ant
 Termite
-Cricket
 Grasshopper
 Katydid
 Cicada
 Aphid
-Bug
 Louse
 Flea
-Tick
-Mite

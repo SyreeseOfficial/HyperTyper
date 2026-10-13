@@ -1,2 +1,2 @@
+# optional: enables sound effects (the game runs without it)
 pygame
-colorama

@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
+import contextlib
+import functools
+import glob
+import json
 import os
 import random
-import sys
-import time
-import json
-import shutil
 import re
 import select
+import shutil
+import sys
+import time
 import unicodedata
-import contextlib
-from colorama import Fore, Back, Style, init
 
 try:
     import termios, tty
@@ -18,22 +19,31 @@ except ImportError:  # Windows
     import msvcrt
     termios = None
 
-# Initialize colorama
-init(autoreset=True)
+# --- ANSI colors (plain escape codes; no colorama needed) ---
+if os.name == "nt":
+    os.system("")  # turns on ANSI escape processing in the Windows console
 
-# Try importing pygame
-try:
-    import pygame
-    PYGAME_AVAILABLE = True
-except ImportError:
-    PYGAME_AVAILABLE = False
-    print("Warning: pygame not installed. Audio will be disabled.")
-    time.sleep(1)
+class Fore:
+    RED, GREEN, YELLOW, CYAN, MAGENTA, WHITE = (f"\033[{n}m" for n in (31, 32, 33, 36, 35, 37))
+    BLUE, ORANGE = "\033[94m", "\033[38;5;208m"
+
+class Style:
+    BRIGHT, UNDERLINE, RESET_ALL = "\033[1m", "\033[4m", "\033[0m"
+
+# Right/wrong signals. apply_theme() swaps them for a colorblind-safe pair (blue vs underlined orange).
+GOOD, BAD = Fore.GREEN, Fore.RED
 
 # --- Configuration & Data ---
 SOUNDS = {}
+SOUND_FILES = {
+    "splash": "splash.wav",
+    "countdown": "countdown.wav",
+    "correct": "correct.wav",
+    "levelup": "levelup.wav",
+    "gameover": "gameover.wav",
+    "victory": "victory.wav",
+}
 
-# Determine paths
 APP_NAME = "hypertyper"
 
 # 1. Data Directory (Read-only assets: words, sounds)
@@ -45,7 +55,7 @@ else:
     # Standard Linux install path
     DATA_DIR = os.path.join("/usr/share", APP_NAME, "data")
 
-# 2. Config Directory (Writable: settings, highscores)
+# 2. Config Directory (Writable: settings, highscores, history, your own word lists)
 # Use XDG_CONFIG_HOME or default to ~/.config
 xdg_config = os.environ.get("XDG_CONFIG_HOME", os.path.join(os.path.expanduser("~"), ".config"))
 CONFIG_DIR = os.path.join(xdg_config, APP_NAME)
@@ -55,36 +65,63 @@ os.makedirs(CONFIG_DIR, exist_ok=True)
 
 HIGHSCORE_FILE = os.path.join(CONFIG_DIR, "highscores.json")
 SETTINGS_FILE = os.path.join(CONFIG_DIR, "settings.json")
+HISTORY_FILE = os.path.join(CONFIG_DIR, "history.jsonl")
+WORDS_DIR = os.path.join(CONFIG_DIR, "words")  # any *.txt in here becomes a mode
 
-# Backwards compatibility: Migration from local dir if user was running locally before
-# (Optional: You could add logic here to move local json files to CONFIG_DIR if they exist)
-
-WORD_FILE = "words.txt"
 BACKUP_WORDS = ["apple", "banana", "cherry", "date", "elderberry", "fig", "grape", "lemon", "lime", "mango"]
+
+# (menu name, word file, exact_match). The name is also the high-score key.
+MODES = [
+    ("Streak", "words.txt", False),
+    ("Cities", "capitals.txt", True),
+    ("Food", "foods.txt", False),
+    ("Animals", "animals.txt", False),
+    ("Lorem", "lorem.txt", False),
+    ("Code Snippets", "code.txt", True),
+    ("Terminal Commands", "terminal.txt", True),
+    ("Brainrot", "brainrot.txt", True),
+    ("UwU", "uwu.txt", True),
+    ("LinkedIn Jargon", "linkedin.txt", True),
+    ("Spanish", "spanish.txt", False),
+    ("Pokemon", "pokemon.txt", False),
+    ("Quotes", "quotes.txt", True),
+]
+
+# Word-length filter for the word-based (non exact-match) modes: (min, max) letters.
+LENGTHS = {"all": (0, 99), "short": (0, 5), "medium": (6, 8), "long": (9, 99)}
+
+ACHIEVEMENTS = [  # (name, description, test on a finished run's history record)
+    ("God Mode", "Reach a 12-word combo", lambda r: r.get("best_combo", 0) >= 12),
+    ("Speed Demon", "Hit 50 WPM", lambda r: r.get("wpm", 0) >= 50),
+    ("Centurion", "Type 100 words in one run", lambda r: r.get("words", 0) >= 100),
+]
+
+MIN_COLS, MIN_ROWS = 60, 15
 
 DEFAULT_SETTINGS = {
     "sound": True,
+    "volume": 100,
     "time_limit": 30,
-    "show_timer": True
+    "show_timer": True,
+    "practice": False,
+    "difficulty": "all",
+    "colorblind": False,
 }
-SETTINGS = {}
+SETTINGS = DEFAULT_SETTINGS.copy()
 
 # --- Helper Functions ---
 
 def load_settings():
-    """Loads settings from data/settings.json, creating it with defaults if missing."""
+    """Loads settings from SETTINGS_FILE, creating it with defaults if missing."""
     global SETTINGS
-    
-    # Path is global constant now
-    file_path = SETTINGS_FILE
-    
-    if not os.path.exists(file_path):
+
+    if not os.path.exists(SETTINGS_FILE):
         SETTINGS = DEFAULT_SETTINGS.copy()
         save_settings(SETTINGS)
         return
 
     try:
-        with open(file_path, 'r') as f:
+        with open(SETTINGS_FILE, 'r') as f:
             data = json.load(f)
             # Merge with defaults to ensure all keys exist
             SETTINGS = DEFAULT_SETTINGS.copy()
@@ -94,28 +131,34 @@ def load_settings():
         save_settings(SETTINGS)
 
 def save_settings(new_settings):
-    """Saves the settings dict to data/settings.json."""
+    """Saves the settings dict to SETTINGS_FILE."""
     global SETTINGS
     SETTINGS = new_settings
-    
-    file_path = SETTINGS_FILE
+
     try:
-        with open(file_path, 'w') as f:
+        with open(SETTINGS_FILE, 'w') as f:
             json.dump(SETTINGS, f, indent=4)
     except IOError:
         print(f"\n{Fore.RED}Warning: Could not save settings.{Style.RESET_ALL}")
 
-def load_words(filename, exact_match=False):
-    """Loads words from data/filename. Falls back to BACKUP_WORDS if needed.
+def apply_theme():
+    """Picks the right/wrong colors for the current palette setting."""
+    global GOOD, BAD
+    if SETTINGS["colorblind"]:
+        GOOD, BAD = Fore.BLUE, Fore.ORANGE + Style.UNDERLINE
+    else:
+        GOOD, BAD = Fore.GREEN, Fore.RED
+
+@functools.lru_cache(maxsize=None)
+def load_words(path, exact_match=False):
+    """Loads unique lines from `path` (file order kept). Falls back to BACKUP_WORDS if needed.
     If exact_match is True, preserves case and allows punctuation/spaces.
+    Cached per (path, exact_match); callers must not mutate the result.
     """
     words = []
-    # Look for filename inside the DATA_DIR folder
-    file_path = os.path.join(DATA_DIR, filename)
-    
-    if os.path.exists(file_path):
+    if os.path.exists(path):
         try:
-            with open(file_path, 'r') as f:
+            with open(path, 'r') as f:
                 for line in f:
                     if exact_match:
                         # Just strip newlines, keep content as is
@@ -130,62 +173,57 @@ def load_words(filename, exact_match=False):
         except IOError:
             pass # Keep list empty to trigger backup
 
+    words = list(dict.fromkeys(words))  # a repeated line would otherwise come up more often
     if not words:
-        print(f"Warning: {file_path} not found or empty, using backup list.")
-        time.sleep(2) # Give user a chance to see the warning
+        print(f"Warning: {path} not found or empty, using backup list.")
         return BACKUP_WORDS
-    
+
     return words
 
+def pick_words(words, exact_match):
+    """Applies the difficulty (word length) setting to word-based modes."""
+    lo, hi = LENGTHS.get(SETTINGS["difficulty"], LENGTHS["all"])
+    picked = [] if exact_match else [w for w in words if lo <= len(w) <= hi]
+    return picked if len(picked) >= 10 else words  # too few left: ignore the filter
 
-def organize_sound_files():
-    """Checks for a root 'sounds' folder and moves it to data/sounds (Dev mode only)."""
-    # Only run if we are in local dev mode
-    if DATA_DIR != os.path.join(os.path.dirname(os.path.abspath(__file__)), "data"):
-        return
+def word_bag(words):
+    """Yields every word once per shuffle, never the same word twice in a row."""
+    last = None
+    while True:
+        bag = random.sample(words, len(words))
+        if len(bag) > 1 and bag[0] == last:
+            bag[0], bag[-1] = bag[-1], bag[0]
+        yield from bag
+        last = bag[-1]
 
-    root_sounds = "sounds"
-    dest_sounds = os.path.join(DATA_DIR, "sounds")
-    
-    if os.path.exists(root_sounds) and os.path.isdir(root_sounds):
-        if not os.path.exists(dest_sounds):
-            print(f"{Fore.YELLOW}Organizing: Moving '{root_sounds}' to '{dest_sounds}'...{Style.RESET_ALL}")
-            try:
-                shutil.move(root_sounds, dest_sounds)
-                time.sleep(1)
-            except Exception as e:
-                print(f"{Fore.RED}Error moving sounds folder: {e}{Style.RESET_ALL}")
-                time.sleep(2)
-        else:
-            # Destination already exists, maybe merge? For now just warn
-            print(f"{Fore.YELLOW}Note: '{root_sounds}' exists but '{dest_sounds}' also exists. Manual cleanup may be needed.{Style.RESET_ALL}")
-            time.sleep(2)
+def get_modes():
+    """Built-in MODES plus one exact-match mode per ~/.config/hypertyper/words/*.txt."""
+    builtin = [(name, os.path.join(DATA_DIR, f), exact) for name, f, exact in MODES]
+    custom = [(os.path.splitext(os.path.basename(p))[0], p, True)
+              for p in sorted(glob.glob(os.path.join(WORDS_DIR, "*.txt")))]
+    return builtin + custom
+
+def score_key(name, exact_match):
+    """High-score key: records are per mode, timer length, difficulty (word modes only) and practice."""
+    diff = SETTINGS["difficulty"]
+    return (f"{name}@{int(SETTINGS['time_limit'])}s"
+            + ("" if exact_match or diff == "all" else f" {diff}")
+            + (" practice" if SETTINGS["practice"] else ""))
 
 def init_audio():
-    """Initializes pygame mixer and loads sounds."""
-    global SOUNDS
-    if not PYGAME_AVAILABLE:
+    """Loads sounds. pygame is imported only here, and only when sound is on. Safe to call repeatedly."""
+    if SOUNDS or not SETTINGS["sound"]:
         return
-
+    os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
     try:
+        import pygame
         pygame.mixer.init()
-    except Exception as e:
-        print(f"{Fore.RED}Audio Init Failed: {e}{Style.RESET_ALL}")
+    except Exception as e:  # not installed, or no audio device
+        print(f"{Fore.YELLOW}Audio disabled: {e}{Style.RESET_ALL}")
         return
 
-    sound_files = {
-        "splash": "splash.wav",
-        "countdown": "countdown.wav",
-        "correct": "correct.wav",
-        "levelup": "levelup.wav",
-        "gameover": "gameover.wav",
-        "victory": "victory.wav"
-    }
-    
     base_path = os.path.join(DATA_DIR, "sounds")
-    
-    print(f"{Fore.CYAN}Loading sounds...{Style.RESET_ALL}")
-    for name, filename in sound_files.items():
+    for name, filename in SOUND_FILES.items():
         path = os.path.join(base_path, filename)
         if os.path.exists(path):
             try:
@@ -194,29 +232,37 @@ def init_audio():
                 print(f"{Fore.RED}Failed to load {filename}: {e}{Style.RESET_ALL}")
         else:
             print(f"{Fore.YELLOW}Warning: Sound file '{filename}' not found.{Style.RESET_ALL}")
-    
-    # Small delay to let user see load status if any issues
-    # time.sleep(0.5)
+    apply_volume()
+
+def apply_volume():
+    for s in SOUNDS.values():
+        s.set_volume(SETTINGS["volume"] / 100)
 
 def play_sound(name):
     """Plays a sound by name if available."""
-    # Check settings first
-    if not SETTINGS.get("sound", True):
-        return
-
-    if name in SOUNDS:
+    if SETTINGS["sound"] and name in SOUNDS:
         try:
             SOUNDS[name].play()
-        except:
+        except Exception:
             pass
 
-
+ANSI_RE = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
 
 def get_visible_length(s):
-    """Returns the length of the string without ANSI color codes."""
-    ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+    """Returns the length of the string in terminal columns, without ANSI color codes."""
     # East Asian Wide/Fullwidth chars (incl. emoji) take 2 terminal columns
-    return sum(2 if unicodedata.east_asian_width(c) in 'WF' else 1 for c in ansi_escape.sub('', s))
+    return sum(2 if unicodedata.east_asian_width(c) in 'WF' else 1 for c in ANSI_RE.sub('', s))
+
+def fold(s):
+    """Drops accents (n for ñ) so any keyboard can type any word."""
+    return "".join(c for c in unicodedata.normalize("NFD", s) if not unicodedata.combining(c))
+
+def same(typed, target):
+    return fold(typed) == fold(target)
+
+def wpm(chars, seconds):
+    """Standard WPM: 5 chars = 1 word, over the elapsed time (at least 1 s)."""
+    return (chars / 5.0) / (max(seconds, 1.0) / 60.0)
 
 def get_combo_tier(combo):
     """
@@ -242,6 +288,8 @@ def get_combo_tier(combo):
     else:
         return "", 1.0, ""
 
+# --- Input & screen drawing ---
+
 def flush_input():
     """Discards keys typed ahead (e.g. during the countdown) so they don't become the next answer."""
     if not sys.stdin.isatty():
@@ -252,20 +300,29 @@ def flush_input():
         while msvcrt.kbhit():
             msvcrt.getwch()
 
-def read_key():
-    """Reads one keypress without waiting for Enter. Returns '' for keys we ignore (arrows etc.)."""
+def read_key(timeout=None):
+    """One keypress without waiting for Enter. Esc is '\\x1b'; '' = ignored key (arrows etc.); None = timed out."""
     if msvcrt:
+        end = None if timeout is None else time.time() + timeout
+        while not msvcrt.kbhit():
+            if end is not None and time.time() >= end:
+                return None
+            time.sleep(0.01)
         ch = msvcrt.getwch()
         if ch in ("\x00", "\xe0"):  # arrow/function key: swallow its second code
             msvcrt.getwch()
             return ""
         return ch
     fd = sys.stdin.fileno()
+    if not select.select([fd], [], [], timeout)[0]:
+        return None
     b = os.read(fd, 1)
     if not b:
         raise EOFError
-    if b == b"\x1b":  # escape sequence (arrows etc.): swallow it
-        while select.select([fd], [], [], 0.02)[0]:
+    if b == b"\x1b":
+        if not select.select([fd], [], [], 0.02)[0]:
+            return "\x1b"  # nothing followed: a bare Esc press
+        while select.select([fd], [], [], 0.02)[0]:  # escape sequence (arrows etc.): swallow it
             os.read(fd, 8)
         return ""
     extra = 0 if b[0] < 0xC0 else 1 if b[0] < 0xE0 else 2 if b[0] < 0xF0 else 3  # UTF-8 continuation bytes
@@ -285,109 +342,124 @@ def cbreak_mode():
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
-def read_typed(prompt, target, cols):
-    """Reads an answer key by key, echoing each char green if it matches target[i], red if not."""
-    if not sys.stdin.isatty():
-        return input("")
-    maxlen = len(target) + 10  # ponytail: extra keys past this are ignored; keeps the line from wrapping
-    pad = " " * max(0, (cols - get_visible_length(prompt) - maxlen) // 2)
-    buf = ""
-    with cbreak_mode():
-        while True:
-            typed = "".join(
-                (Fore.GREEN if i < len(target) and c == target[i] else Fore.RED) + c
-                for i, c in enumerate(buf))
-            sys.stdout.write(f"\r{pad}{prompt}{typed}{Style.RESET_ALL}\033[K")
-            sys.stdout.flush()
-            ch = read_key()
-            if ch in ("\r", "\n"):
-                break
-            if ch in ("\x7f", "\x08"):
-                buf = buf[:-1]
-            elif ch == "\x03":  # Ctrl-C (only arrives raw on Windows)
-                raise KeyboardInterrupt
-            elif ch == "\x04":
-                raise EOFError
-            elif ch.isprintable() and len(buf) < maxlen:
-                buf += ch
-    print()
-    return buf
-
-def draw_centered(lines, input_prompt=None, target=None):
-    """
-    Clears screen and draws the list of 'lines' centered vertically and horizontally.
-    If input_prompt is provided, it is printed centered below the lines,
-    and the function returns the user input. If target is also given, the input is
-    read key by key and colored against target (see read_typed).
-    """
-    clear_screen()
-    
-    # Get terminal size
-    cols, rows = shutil.get_terminal_size()
-    
-    # Calculate total height of content
-    content_height = len(lines)
-    if input_prompt is not None:
-        content_height += 2 # Add spacing + prompt line
-        
-    # Vertical padding (top)
-    # Ensure at least 0
-    top_padding = max(0, (rows - content_height) // 2)
-    
-    # Print top newlines
-    print("\n" * top_padding)
-    
-    # Print each line centered
-    for line in lines:
-        vis_len = get_visible_length(line)
-        left_padding = max(0, (cols - vis_len) // 2)
-        print(" " * left_padding + line)
-        
-    if input_prompt is not None:
-        # Print a blank spacer line
-        print()
-        # Calculate padding for prompt
-        vis_len = get_visible_length(input_prompt)
-        left_padding = max(0, (cols - vis_len) // 2)
-        
-        flush_input()
-        if target is not None:
-            return read_typed(input_prompt, target, cols)
-
-        # Print prompt with padding, no newline at end so cursor stays there
-        print(" " * left_padding + input_prompt, end='')
-        return input("")
-
-
-
 def clear_screen():
     """Clears the terminal screen."""
-    # os.name is 'nt' for Windows, 'posix' for Linux/Mac
-    if os.name == 'nt':
-        os.system('cls')
-    else:
-        os.system('clear')
+    sys.stdout.write("\033[2J\033[H")
+    sys.stdout.flush()
+
+def center(s, cols):
+    return " " * max(0, (cols - get_visible_length(s)) // 2) + s
+
+def build_frame(lines, prompt=None, typed="", reserve=0):
+    """One full screen as a string: `lines` centered in the terminal, plus an optional prompt line below.
+    `reserve` is the width the typed text may grow to; it is left free so the prompt doesn't shift."""
+    cols, rows = shutil.get_terminal_size()
+    out = [center(l, cols) for l in lines]
+    if prompt is not None:
+        pad = " " * max(0, (cols - get_visible_length(prompt) - reserve) // 2)
+        out += ["", pad + prompt + typed]
+    out = [""] * max(0, (rows - len(out)) // 2) + out
+    if cols < MIN_COLS or rows < MIN_ROWS:
+        out.insert(0, f"{Fore.RED}Terminal is {cols}x{rows}: resize to at least {MIN_COLS}x{MIN_ROWS}{Style.RESET_ALL}")
+    # Home the cursor and overwrite in place (no clear => no flicker); \033[K / \033[J wipe leftovers.
+    return "\033[H" + "\n".join(l + Style.RESET_ALL + "\033[K" for l in out[-rows:]) + "\033[J"
+
+def screen(lines, prompt="", target=None, done=None, deadline=None):
+    """
+    Draws `lines` centered with a prompt below and reads the answer key by key.
+    Redraws ~10x/s only when something changed (typing, live timer, terminal resize).
+
+    lines     list of lines, or callable(seconds_left) -> list (for a live timer)
+    target    if given, typed chars are colored GOOD/BAD against it and stale keys are not flushed
+    done      callable(buf) -> True to finish early (single-key menus, auto-submit)
+    deadline  time.time() value at which to give up
+    Returns (text, status); status is 'enter', 'auto' (done fired), 'esc' or 'timeout'.
+    """
+    lines_fn = lines if callable(lines) else (lambda remaining: lines)
+    reserve = len(target) + 10 if target else 12  # also the max chars accepted; keeps the line from wrapping
+
+    if not sys.stdin.isatty():  # piped input: no raw keys, no live timer
+        clear_screen()
+        sys.stdout.write(build_frame(lines_fn(None), prompt, "", reserve))
+        sys.stdout.flush()
+        return input(""), "enter"
+
+    if target is None:
+        flush_input()
+    clear_screen()
+    buf, last = "", None
+    with cbreak_mode():
+        while True:
+            remaining = None if deadline is None else deadline - time.time()
+            if remaining is not None and remaining <= 0:
+                return buf, "timeout"
+
+            if target is None:
+                typed = buf
+            else:
+                typed = "".join(
+                    (GOOD if fold(c) == fold(target[i:i + 1]) else BAD) + c for i, c in enumerate(buf))
+            frame = build_frame(lines_fn(remaining), prompt, typed, reserve)
+            if frame != last:
+                sys.stdout.write(frame)
+                sys.stdout.flush()
+                last = frame
+
+            ch = read_key(0.1)
+            if ch is None:
+                continue
+            if ch in ("\r", "\n"):
+                return buf, "enter"
+            if ch == "\x1b":
+                return buf, "esc"
+            if ch == "\x03":  # Ctrl-C (only arrives raw on Windows)
+                raise KeyboardInterrupt
+            if ch == "\x04":
+                raise EOFError
+            if ch in ("\x7f", "\x08"):
+                buf = buf[:-1]
+            elif ch and ch.isprintable() and len(buf) < reserve:
+                buf += ch
+                if done and done(buf):
+                    return buf, "auto"
+
+def draw_centered(lines):
+    """Clears the screen and draws `lines` centered (no input)."""
+    clear_screen()
+    sys.stdout.write(build_frame(lines))
+    sys.stdout.flush()
+
+def wait_key(lines, prompt=f"{Fore.YELLOW}Press any key to continue...{Style.RESET_ALL}"):
+    """Shows `lines` until a key is pressed. Returns the key ('' for Enter/Esc)."""
+    return screen(lines, prompt, done=lambda b: True)[0]
+
+def choose(lines, prompt, n):
+    """Menu pick from 1..n: a digit selects at once unless it could start a longer number (then Enter).
+    Esc picks the last item (Back / Quit)."""
+    text, status = screen(lines, prompt, done=lambda b: not b.isdecimal() or int(b) * 10 > n)
+    return str(n) if status == "esc" else text
 
 def splash_screen():
     """Displays a cool ASCII art logo on startup."""
-    logo = [
-        f"{Fore.MAGENTA}{Style.BRIGHT}",
+    top = [
         r"  _   _  __   __  ____   _____   ____  ",
         r" | | | | \ \ / / |  _ \ | ____| |  _ \ ",
         r" | |_| |  \ V /  | |_) ||  _|   | |_) |",
         r" |  _  |   | |   |  __/ | |___  |  _ < ",
         " |_| |_|   |_|   |_|    |_____| |_| \\_\\",
-        f"{Fore.CYAN}",
+    ]
+    bottom = [
         r"   _____  __   __  ____   _____   ____  ",
         r"  |_   _| \ \ / / |  _ \ | ____| |  _ \ ",
         r"    | |    \ V /  | |_) ||  _|   | |_) |",
         r"    | |     | |   |  __/ | |___  |  _ < ",
         "   |_|     |_|   |_|    |_____| |_| \\_\\",
-        f"{Style.RESET_ALL}"
     ]
-    
+    logo = ([Fore.MAGENTA + Style.BRIGHT + l for l in top] + [""]
+            + [Fore.CYAN + Style.BRIGHT + l for l in bottom])
+
     play_sound("splash")
-    draw_centered(logo, input_prompt=f"{Fore.YELLOW}Press Enter to Start...{Style.RESET_ALL}")
+    wait_key(logo, f"{Fore.YELLOW}Press any key to start...{Style.RESET_ALL}")
 
 def countdown():
     """Runs a 3-2-1-GO countdown."""
@@ -395,37 +467,30 @@ def countdown():
     for i in [3, 2, 1]:
         draw_centered([f"{Fore.CYAN}{Style.BRIGHT}{i}"])
         time.sleep(1)
-    
+
     draw_centered([f"{Fore.GREEN}{Style.BRIGHT}GO!"])
     time.sleep(0.5)
+    flush_input()  # drop keys typed during the countdown
 
-def pause():
-    """Waits for user input to continue."""
-    # We can't really center this effectively without clearing the screen,
-    # but usually pause follows some output. 
-    # If we want to center the "Press Enter" message, we'd need to know what was on screen.
-    # For now, let's keep it simple or we can just print it centered relative to the last known size? 
-    # Actually, the user wants "Action: Clear the screen...". 
-    # So if pause is a standalone screen (like after high scores), we can use draw_centered.
-    input(f"\n{Fore.YELLOW}Press Enter to continue...{Style.RESET_ALL}")
+# --- Persistence: high scores, history ---
 
 def load_high_scores():
     """Loads high scores, migrating old format {'Mode': 100} to {'Mode': {'score': 100, 'name': 'CPU'}}."""
     defaults = {"Streak": {"score": 0, "name": "---"}}
-    
+
     if not os.path.exists(HIGHSCORE_FILE):
         return defaults
-    
+
     try:
         with open(HIGHSCORE_FILE, 'r') as f:
             data = json.load(f)
             if not isinstance(data, dict):
                 return defaults
-            
+
             # Check for migration needs
             migrated = False
             new_data = {}
-            
+
             for k, v in data.items():
                 if isinstance(v, int):
                     # Old format detected
@@ -435,13 +500,13 @@ def load_high_scores():
                     # New format (basic check)
                     new_data[k] = v
                 else:
-                     new_data[k] = {"score": 0, "name": "---"}
-            
+                    new_data[k] = {"score": 0, "name": "---"}
+
             if migrated:
                 print(f"{Fore.YELLOW}Migrated high scores to new format...{Style.RESET_ALL}")
                 save_high_scores(new_data)
                 return new_data
-            
+
             return data
     except (json.JSONDecodeError, IOError):
         return defaults
@@ -454,26 +519,52 @@ def save_high_scores(scores):
     except IOError:
         print("\nWarning: Could not save high scores.")
 
-def get_high_score_data(mode_name):
-    """Returns the high score dict {'score': X, 'name': 'Y'} for a mode."""
-    scores = load_high_scores()
-    return scores.get(mode_name, {"score": 0, "name": "---"})
+def load_history():
+    """Returns the list of finished runs from history.jsonl (bad lines skipped)."""
+    runs = []
+    try:
+        with open(HISTORY_FILE) as f:
+            for line in f:
+                try:
+                    r = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(r, dict):
+                    runs.append(r)
+    except OSError:
+        pass
+    return runs
+
+def append_history(run):
+    try:
+        with open(HISTORY_FILE, 'a') as f:
+            f.write(json.dumps(run) + "\n")
+    except OSError:
+        pass
+
+def earned(run, achievement):
+    """Practice runs don't unlock achievements."""
+    return not run.get("practice") and achievement[2](run)
+
+def sparkline(values):
+    lo, hi = min(values), max(values)
+    return "".join("▁▂▃▄▅▆▇█"[int((v - lo) / ((hi - lo) or 1) * 7)] for v in values)
 
 def show_high_scores():
     """Displays high scores in a formatted Hall of Fame table."""
     scores = load_high_scores()
-    
+
     lines = [
         f"{Fore.CYAN}{Style.BRIGHT}=== HALL OF FAME ==={Style.RESET_ALL}",
         ""
     ]
-    
+
     # Table Header
     # MODE (24) | SCORE (8) | HELD BY
     header = f"{Fore.WHITE}{Style.BRIGHT}{'MODE':<24} {'SCORE':<8} {'HELD BY'}{Style.RESET_ALL}"
     lines.append(header)
     lines.append("-" * 45)
-    
+
     if not scores:
         lines.append("No scores recorded yet.")
     else:
@@ -481,336 +572,276 @@ def show_high_scores():
             entry = scores[mode]
             s_val = entry.get('score', 0)
             s_name = entry.get('name', '---')
-            
-            # Format row
-            # Use yellow for score to make it pop
-            row = f"{Fore.CYAN}{mode:<24}{Style.RESET_ALL} {Fore.YELLOW}{s_val:<8}{Style.RESET_ALL} {Fore.MAGENTA}{s_name}{Style.RESET_ALL}"
-            lines.append(row)
-    
+            lines.append(f"{Fore.CYAN}{mode:<24}{Style.RESET_ALL} {Fore.YELLOW}{s_val:<8}{Style.RESET_ALL} {Fore.MAGENTA}{s_name}{Style.RESET_ALL}")
+
     lines.append("")
     lines.append("-" * 45)
-    
-    draw_centered(lines, input_prompt=f"{Fore.YELLOW}Press Enter to continue...{Style.RESET_ALL}")
+
+    wait_key(lines)
+
+def show_stats():
+    """Averages and a WPM trend over all finished runs, plus the achievement list."""
+    runs = load_history()
+    lines = [f"{Fore.CYAN}{Style.BRIGHT}=== STATS ==={Style.RESET_ALL}", ""]
+    if runs:
+        wpms = [r.get("wpm", 0) for r in runs]
+        accs = [r.get("accuracy", 0) for r in runs]
+        lines += [
+            f"Runs: {len(runs)}",
+            f"Avg WPM: {Fore.CYAN}{sum(wpms) / len(runs):.1f}{Style.RESET_ALL}   Best WPM: {Fore.CYAN}{max(wpms):.1f}{Style.RESET_ALL}",
+            f"Avg accuracy: {sum(accs) / len(runs):.0f}%",
+            f"WPM trend (last {min(30, len(runs))}): {Fore.GREEN}{sparkline(wpms[-30:])}{Style.RESET_ALL}",
+        ]
+    else:
+        lines.append("No runs recorded yet.")
+    lines += ["", f"{Fore.WHITE}{Style.BRIGHT}ACHIEVEMENTS{Style.RESET_ALL}"]
+    for a in ACHIEVEMENTS:
+        got = any(earned(r, a) for r in runs)
+        lines.append(f"{Fore.YELLOW + '★' if got else Fore.WHITE + '·'}{Style.RESET_ALL} {a[0]} - {a[1]}")
+    wait_key(lines)
 
 # --- Game Modes ---
 
-def streak_mode(mode_name, word_filename, exact_match=False):
-    """Runs the Streak Mode game loop with a 30s global timer and game feel."""
-    
-    # Load words for this mode
-    current_words = load_words(word_filename, exact_match=exact_match)
-    
+def game_lines(mode_name, score, combo, remaining, msg, word):
+    """The in-game HUD: title, score/timer/combo bar, last-word feedback and the word to type."""
+    tier_name, multiplier, color_code = get_combo_tier(combo)
+    combo_text = f" {color_code}{tier_name} ({multiplier:g}x){Style.RESET_ALL}" if tier_name else ""
+    timer = f"{remaining:.1f}s" if SETTINGS["show_timer"] else "--"
+    return [
+        f"{Fore.CYAN}--- {mode_name.upper()} MODE ---{Style.RESET_ALL}",
+        f"SCORE: {Fore.YELLOW}{score}{Style.RESET_ALL}  |  TIME: {Fore.YELLOW}{timer}{Style.RESET_ALL}  |  COMBO: {GOOD}{combo}{Style.RESET_ALL}{combo_text}",
+        "-" * 60,
+        msg,
+        f"Word:  {Style.BRIGHT}{Fore.WHITE}{word}{Style.RESET_ALL}",
+        "",
+    ]
+
+def pause_screen():
+    """Returns True to resume the game, False to quit to the menu."""
+    lines = [f"{Fore.CYAN}{Style.BRIGHT}=== PAUSED ==={Style.RESET_ALL}", "The timer is stopped."]
+    return wait_key(lines, "Enter = resume, Q = quit to menu: ").lower() != "q"
+
+def streak_mode(mode_name, path, exact_match=False):
+    """Runs a timed streak game (with retry). Esc pauses; a wrong word ends the run unless Practice is on."""
+    words = pick_words(load_words(path, exact_match), exact_match)
+    time_limit = float(SETTINGS["time_limit"])
+    practice = SETTINGS["practice"]
+    key = score_key(mode_name, exact_match)
+
     while True:
-        # Countdown
         countdown()
-        
-        score = 0
-        total_chars_typed = 0  # chars in correct words only
-        raw_chars = 0  # chars in every submitted answer, right or wrong
-        correct_words = 0
-        combo = 0
+
+        score = good_chars = raw_chars = correct_words = combo = best_combo = 0
+        longest = ""
+        msg = ""  # feedback for the previous word, shown in the HUD
         wrong_msg = None
-        start_time = time.time()
+        bag = word_bag(words)
+        start = time.time()
+        deadline = start + time_limit
+        status = "timeout"
 
-        # Use settings for time limit
-        time_limit = float(SETTINGS.get("time_limit", 30))
-        score_key = f"{mode_name}@{int(time_limit)}s"  # records are per mode AND timer length
-        
         while True:
-            # 1. Check time BEFORE showing word
-            elapsed = time.time() - start_time
-            if elapsed >= time_limit:
+            target_word = next(bag)
+            _, multiplier, _ = get_combo_tier(combo)
+            # In word modes the last correct char (or Space) submits; exact modes need Enter.
+            auto = None if exact_match else (lambda b: same(b, target_word) or b.endswith(" "))
+
+            while True:  # same word again after a pause or an empty Enter
+                try:
+                    typed, status = screen(
+                        lambda r: game_lines(mode_name, score, combo, r, msg, target_word),
+                        "Type it: ", target=target_word, done=auto, deadline=deadline)
+                except (EOFError, KeyboardInterrupt):
+                    return
+                if status == "esc":
+                    t0 = time.time()
+                    if not pause_screen():
+                        return
+                    paused = time.time() - t0
+                    start += paused
+                    deadline += paused
+                elif status == "timeout" or typed.strip():
+                    break
+
+            if status == "timeout":  # the word in progress is dropped; the live timer made that visible
                 play_sound("victory")
-                break # Go to Game Over logic
+                break
 
-            remaining = max(0, int(time_limit - elapsed))
-            
-            # Determine multiplier and combo text
-            tier_name, multiplier, color_code = get_combo_tier(combo)
-            
-            combo_text = ""
-            if tier_name:
-                # Format: " TIER_NAME (Nx)"
-                # e.g. " GOD MODE (8x)"
-                # We interpret "x" as multiplier symbol. User asked for "NAME (Nx)"
-                if multiplier.is_integer():
-                    mult_str = f"{int(multiplier)}x"
-                else:
-                    mult_str = f"{multiplier}x"
-                
-                combo_text = f" {color_code}{tier_name} ({mult_str}){Style.RESET_ALL}"
-            
-            target_word = random.choice(current_words)
-            
-            # Construct Game Loop UI
-            # Logic for timer display
-            if SETTINGS.get("show_timer", True):
-                timer_display = f"{Fore.YELLOW}~{remaining}s{Style.RESET_ALL}"
-            else:
-                timer_display = f"{Fore.YELLOW}--{Style.RESET_ALL}"
-                
-            lines = [
-                f"{Fore.CYAN}--- {mode_name.upper()} MODE ---{Style.RESET_ALL}",
-                f"SCORE: {Fore.YELLOW}{score}{Style.RESET_ALL}  |  TIME: {timer_display}  |  COMBO: {Fore.GREEN}{combo}{Style.RESET_ALL}{combo_text}",
-                "-" * 60,
-                "",
-                f"Word:  {Style.BRIGHT}{Fore.WHITE}{target_word}{Style.RESET_ALL}",
-                ""
-            ]
-            
-            try:
-                user_input = draw_centered(lines, input_prompt="Type it: ", target=target_word).strip()
-            except (EOFError, KeyboardInterrupt):
-                return
+            typed = typed.strip()
+            raw_chars += len(typed)
 
-            # 2. Check time AFTER input
-            elapsed = time.time() - start_time
-            if elapsed >= time_limit:
-                play_sound("victory")
-                break # Go to Game Over logic
-
-            raw_chars += len(user_input)
-
-            # 3. Sudden Death Check
-            if user_input == target_word:
+            if same(typed, target_word):
                 combo += 1
-                word_len = len(target_word)
-                points = int(word_len * multiplier)
+                best_combo = max(best_combo, combo)
+                points = int(len(target_word) * multiplier)
                 score += points
-                
-                total_chars_typed += word_len
+                good_chars += len(target_word)
                 correct_words += 1
-                
-                # Success Flash - Centered manually since we don't want to clear screen
-                play_sound("correct")
-                
-                # Check for combo tier up (simple check: if combo hits a threshold exactly)
-                # Tiers: 3, 5, 7, 10, 12
-                if combo in [3, 5, 7, 10, 12]:
-                    play_sound("levelup")
-                
-                msg = f"{Fore.GREEN}{target_word} OK! (+{points}){Style.RESET_ALL}"
-                cols, _ = shutil.get_terminal_size()
-                vis_len = get_visible_length(msg)
-                padding = max(0, (cols - vis_len) // 2)
-                print(" " * padding + msg)
-                time.sleep(0.2)
-            else:
-                combo = 0 # Reset combo on mistake (though game ends here anyway)
+                if len(target_word) > len(longest):
+                    longest = target_word
 
-                play_sound("gameover")
-                wrong_msg = f"{Fore.RED}You typed '{user_input}', expected '{target_word}'{Style.RESET_ALL}"
-                break # Go to Game Over logic
+                play_sound("correct")
+                if combo in (3, 5, 7, 10, 12):  # combo tier thresholds
+                    play_sound("levelup")
+                msg = f"{GOOD}✓ {target_word} +{points}{Style.RESET_ALL}"
+            else:
+                combo = 0
+                msg = f"{BAD}✗ You typed '{typed}', expected '{target_word}'{Style.RESET_ALL}"
+                if not practice:
+                    play_sound("gameover")
+                    wrong_msg = msg
+                    status = "wrong"
+                    break
 
         # --- GAME OVER SCREEN ---
-        final_elapsed = time.time() - start_time
-        
-        if final_elapsed < 1.0: 
-            final_elapsed = 1.0 # Avoid div by zero
-        
-        minutes = final_elapsed / 60.0
-        # WPM = chars / 5 / minutes over the full run. Net counts correct words only; raw counts every submission.
-        wpm = (total_chars_typed / 5.0) / minutes if minutes > 0 else 0
-        raw_wpm = (raw_chars / 5.0) / minutes if minutes > 0 else 0
-        
-        extra = [wrong_msg] if wrong_msg else []  # shifts the insert() indices below
-        lines = [
-            "",
-            f"{Fore.RED}{Style.BRIGHT}GAME OVER{Style.RESET_ALL}",
-            *extra,
-            f"Final Score: {Fore.YELLOW}{score}{Style.RESET_ALL}",
-            "-" * 30,
-            f"Total Words Typed: {correct_words}",
-            f"WPM: {Fore.CYAN}{wpm:.1f}{Style.RESET_ALL} (raw {raw_wpm:.1f})",
-            "-" * 30,
-            "",
-            f"[{Fore.CYAN}Press ENTER for Menu{Style.RESET_ALL}] or [{Fore.CYAN}Press 'R' to Retry{Style.RESET_ALL}]"
-        ]
-        
+        elapsed = time_limit if status == "timeout" else time.time() - start
+        net_wpm = wpm(good_chars, elapsed)  # correct words only; raw counts every submitted char
+        raw_wpm = wpm(raw_chars, elapsed)
+        accuracy = 100.0 * good_chars / raw_chars if raw_chars else 100.0
 
-        # Check High Score
-        hs_data = get_high_score_data(score_key)
-        current_best = hs_data.get('score', 0)
-        is_new_record = score > current_best
-        
+        time.sleep(0.5)  # keys from the word you were mid-typing are flushed by the next screen
+
+        run = {
+            "date": time.strftime("%Y-%m-%d %H:%M"), "mode": mode_name, "time": int(time_limit),
+            "wpm": round(net_wpm, 1), "accuracy": round(accuracy, 1), "score": score,
+            "words": correct_words, "best_combo": best_combo, "practice": practice,
+        }
+        history = load_history()
+        unlocked = [a for a in ACHIEVEMENTS if earned(run, a) and not any(earned(r, a) for r in history)]
+        append_history(run)
+
+        scores = load_high_scores()
+        best = scores.get(key, {"score": 0, "name": "---"})
+        is_new_record = score > best.get("score", 0)
+
+        lines = ["", f"{Fore.RED}{Style.BRIGHT}GAME OVER{Style.RESET_ALL}"]
+        if wrong_msg:
+            lines.append(wrong_msg)
         if is_new_record:
             play_sound("levelup")
-            lines.insert(2, f"{Fore.GREEN}🚨 NEW HIGH SCORE! 🚨{Style.RESET_ALL}")
-            
-            # Prompt for name
-            prompt_line = f"Enter initials (3 chars): "
-            
-            while True:
-                name_input = draw_centered(lines, input_prompt=prompt_line).strip().upper()
-                if len(name_input) > 3:
-                     name_input = name_input[:3]
-                
-                if name_input:
-                    # Save it
-                    all_scores = load_high_scores()
-                    all_scores[score_key] = {'score': score, 'name': name_input}
-                    save_high_scores(all_scores)
-                    
-                    lines.append(f"{Fore.GREEN}Score Saved! {name_input} - {score}{Style.RESET_ALL}")
-                    break
-                else:
-                    # Force default
-                    name_input = 'UNK'
-                    all_scores = load_high_scores()
-                    all_scores[score_key] = {'score': score, 'name': name_input}
-                    save_high_scores(all_scores)
-                    lines.append(f"{Fore.GREEN}Score Saved! {name_input} - {score}{Style.RESET_ALL}")
-                    break
+            lines.append(f"{Fore.GREEN}🚨 NEW HIGH SCORE! 🚨{Style.RESET_ALL}")
+        lines += [
+            f"Final Score: {Fore.YELLOW}{score}{Style.RESET_ALL} ({score - best.get('score', 0):+d} vs best)",
+            "-" * 30,
+            f"Total Words Typed: {correct_words}",
+            f"WPM: {Fore.CYAN}{net_wpm:.1f}{Style.RESET_ALL} (raw {raw_wpm:.1f})",
+            f"Accuracy: {accuracy:.0f}%",
+            f"Best Combo: {best_combo}",
+            f"Longest Word: {longest or '-'}",
+            "-" * 30,
+        ]
+        lines += [f"{Fore.YELLOW}★ Achievement unlocked: {a[0]} - {a[1]}{Style.RESET_ALL}" for a in unlocked]
 
-            lines.append("")
-            lines.append(f"[{Fore.CYAN}Press ENTER for Menu{Style.RESET_ALL}] or [{Fore.CYAN}Press 'R' to Retry{Style.RESET_ALL}]")
-             
-            cmd = draw_centered(lines, input_prompt="").strip().lower()
-            if cmd == 'r':
-                continue
-            else:
-                break
-            
+        if is_new_record:
+            name = screen(lines, "Enter initials (3 chars): ")[0].strip().upper()[:3] or "UNK"
+            scores[key] = {"score": score, "name": name}
+            save_high_scores(scores)
+            lines.append(f"{Fore.GREEN}Score Saved! {name} - {score}{Style.RESET_ALL}")
         else:
-            # Not a high score
-            hs_msg = f"{Fore.CYAN}High Score: {current_best} ({hs_data.get('name', '---')}){Style.RESET_ALL}"
-            lines.insert(7 + len(extra), hs_msg)
-            
-            lines.append(f"[{Fore.CYAN}Press ENTER for Menu{Style.RESET_ALL}] or [{Fore.CYAN}Press 'R' to Retry{Style.RESET_ALL}]")
-            
-            cmd = draw_centered(lines, input_prompt="").strip().lower()
-            if cmd == 'r':
-                continue # Restart loop
-            else:
-                break # Return to menu
+            lines.append(f"{Fore.CYAN}High Score: {best.get('score', 0)} ({best.get('name', '---')}){Style.RESET_ALL}")
+
+        lines += ["", f"[{Fore.CYAN}Press ENTER for Menu{Style.RESET_ALL}] or [{Fore.CYAN}Press 'R' to Retry{Style.RESET_ALL}]"]
+        if wait_key(lines, "").lower() != "r":
+            break
 
 def play_menu():
-    """Submenu for selecting a game mode."""
+    """Submenu for selecting a game mode, showing your best score for the current timer settings."""
     while True:
+        modes = get_modes()
+        scores = load_high_scores()
+        n = len(modes) + 1  # last item is Back
+        tags = [f"{SETTINGS['time_limit']}s"]
+        if SETTINGS["difficulty"] != "all":
+            tags.append(SETTINGS["difficulty"])
+        if SETTINGS["practice"]:
+            tags.append("practice")
         lines = [
-            f"{Fore.CYAN}{Style.BRIGHT}--- SELECT CATEGORY ---{Style.RESET_ALL}",
-            f"{Fore.CYAN}1. Streak{Style.RESET_ALL}",
-            f"{Fore.CYAN}2. Cities{Style.RESET_ALL}",
-            f"{Fore.CYAN}3. Food{Style.RESET_ALL}",
-            f"{Fore.CYAN}4. Animals{Style.RESET_ALL}",
-            f"{Fore.CYAN}5. Lorem Ipsum{Style.RESET_ALL}",
-            f"{Fore.CYAN}6. Code Snippets{Style.RESET_ALL}",
-            f"{Fore.CYAN}7. Terminal Commands{Style.RESET_ALL}",
-            f"{Fore.CYAN}8. Brainrot{Style.RESET_ALL}",
-            f"{Fore.CYAN}9. UwU{Style.RESET_ALL}",
-            f"{Fore.CYAN}10. LinkedIn Jargon{Style.RESET_ALL}",
-            f"{Fore.CYAN}11. Spanish{Style.RESET_ALL}",
-            f"{Fore.CYAN}12. Pokemon{Style.RESET_ALL}",
-            f"{Fore.CYAN}13. Back to Main Menu{Style.RESET_ALL}"
+            f"{Fore.CYAN}{Style.BRIGHT}--- SELECT MODE ---{Style.RESET_ALL}",
+            f"{Fore.YELLOW}Timer: {' | '.join(tags)}{Style.RESET_ALL}",
+            f"{Fore.WHITE}{Style.BRIGHT}    {'MODE':<20} {'BEST':>5}{Style.RESET_ALL}",
         ]
-        
+        for i, (name, _, exact) in enumerate(modes, 1):
+            best = scores.get(score_key(name, exact), {}).get("score", 0)
+            lines.append(f"{Fore.CYAN}{i:>2}. {name[:20]:<20}{Style.RESET_ALL} {Fore.YELLOW}{best:>5}{Style.RESET_ALL}")
+        lines.append(f"{Fore.CYAN}{n:>2}. {'Back to Main Menu':<20}{Style.RESET_ALL}      ")
+
         try:
-            choice = draw_centered(lines, input_prompt="Select an option (1-13): ").strip()
+            choice = choose(lines, f"Select an option (1-{n}): ", n).strip()
         except (EOFError, KeyboardInterrupt):
             break
 
-        if choice == '1':
-            streak_mode("Streak", "words.txt")
-        elif choice == '2':
-            streak_mode("Cities", "capitals.txt", exact_match=True)
-        elif choice == '3':
-            streak_mode("Food", "foods.txt")
-        elif choice == '4':
-            streak_mode("Animals", "animals.txt")
-        elif choice == '5':
-            streak_mode("Lorem", "lorem.txt")
-        elif choice == '6':
-            streak_mode("Code Snippets", "code.txt", exact_match=True)
-        elif choice == '7':
-            streak_mode("Terminal Commands", "terminal.txt", exact_match=True)
-        elif choice == '8':
-            streak_mode("Brainrot", "brainrot.txt", exact_match=True)
-        elif choice == '9':
-            streak_mode("UwU", "uwu.txt", exact_match=True)
-        elif choice == '10':
-            streak_mode("LinkedIn Jargon", "linkedin.txt", exact_match=True)
-        elif choice == '11':
-            streak_mode("Spanish", "spanish.txt")
-        elif choice == '12':
-            streak_mode("Pokemon", "pokemon.txt")
-        elif choice == '13':
+        if choice == str(n):
             break
-        else:
-            pass
+        if choice.isdecimal() and 1 <= int(choice) < n:
+            streak_mode(*modes[int(choice) - 1])
 
 def settings_menu():
     """Menu for changing game settings."""
+    toggles = {'1': ("sound", True), '4': ("show_timer", True), '5': ("practice", False), '7': ("colorblind", False)}
+
+    def flag(on, yes="ON", no="OFF"):
+        return f"[{Fore.GREEN if on else Fore.RED}{yes if on else no}{Style.RESET_ALL}]"
+
     while True:
-        # Load current values from global SETTINGS
-        s_sound = "ON" if SETTINGS.get("sound", True) else "OFF"
-        s_time = SETTINGS.get("time_limit", 30)
-        s_display = "SHOW" if SETTINGS.get("show_timer", True) else "HIDE"
-        
-        # Colors for status
-        c_sound = Fore.GREEN if s_sound == "ON" else Fore.RED
-        c_display = Fore.GREEN if s_display == "SHOW" else Fore.RED
-        
         lines = [
             f"{Fore.CYAN}{Style.BRIGHT}=== SETTINGS ==={Style.RESET_ALL}",
-            f"1. Sound: [{c_sound}{s_sound}{Style.RESET_ALL}]",
-            f"2. Timer Length: [{Fore.YELLOW}{s_time}s{Style.RESET_ALL}]",
-            f"3. Timer Display: [{c_display}{s_display}{Style.RESET_ALL}]",
-            f"4. {Fore.RED}Reset All High Scores{Style.RESET_ALL}",
-            f"5. Back to Main Menu"
+            f"1. Sound: {flag(SETTINGS['sound'])}",
+            f"2. Volume: [{Fore.YELLOW}{SETTINGS['volume']}%{Style.RESET_ALL}]",
+            f"3. Timer Length: [{Fore.YELLOW}{SETTINGS['time_limit']}s{Style.RESET_ALL}]",
+            f"4. Timer Display: {flag(SETTINGS['show_timer'], 'SHOW', 'HIDE')}",
+            f"5. Practice Mode (mistakes only reset combo): {flag(SETTINGS['practice'])}",
+            f"6. Word Length: [{Fore.YELLOW}{SETTINGS['difficulty'].upper()}{Style.RESET_ALL}]",
+            f"7. Colorblind Palette: {flag(SETTINGS['colorblind'])}",
+            f"8. {Fore.RED}Reset All High Scores{Style.RESET_ALL}",
+            "9. Back to Main Menu",
         ]
-        
+
         try:
-            choice = draw_centered(lines, input_prompt="Select an option (1-5): ").strip()
+            choice = choose(lines, "Select an option (1-9): ", 9).strip()
+
+            if choice in toggles:
+                key, default = toggles[choice]
+                SETTINGS[key] = not SETTINGS.get(key, default)
+                apply_theme()  # both are no-ops unless colorblind / sound just changed
+                init_audio()
+                save_settings(SETTINGS)
+
+            elif choice == '2':
+                SETTINGS["volume"] = (SETTINGS["volume"] - 25) % 125  # 100 -> 75 -> 50 -> 25 -> 0 -> 100
+                apply_volume()
+                save_settings(SETTINGS)
+                play_sound("correct")
+
+            elif choice == '3':
+                raw, _ = screen([f"Current: {SETTINGS['time_limit']}s"], "Seconds (5-600, Enter = next preset): ")
+                raw = raw.strip()
+                if raw.isdecimal() and 5 <= int(raw) <= 600:
+                    SETTINGS["time_limit"] = int(raw)
+                elif not raw:
+                    options = [15, 30, 60, 120]
+                    SETTINGS["time_limit"] = next((o for o in options if o > SETTINGS["time_limit"]), options[0])
+                save_settings(SETTINGS)
+
+            elif choice == '6':
+                levels = list(LENGTHS)
+                i = levels.index(SETTINGS["difficulty"]) if SETTINGS["difficulty"] in levels else -1
+                SETTINGS["difficulty"] = levels[(i + 1) % len(levels)]
+                save_settings(SETTINGS)
+
+            elif choice == '8':
+                warning_lines = [
+                    f"{Fore.RED}{Style.BRIGHT}ARE YOU SURE? THIS CANNOT BE UNDONE.{Style.RESET_ALL}",
+                    "Type 'Y' or 'y' to confirm, anything else to cancel."
+                ]
+                confirm, _ = screen(warning_lines, "Confirm Reset: ")
+                if confirm.strip().lower() == 'y':
+                    save_high_scores({})
+                    wait_key([f"{Fore.GREEN}Scores Reset!{Style.RESET_ALL}"])
+
+            elif choice == '9':
+                break
         except (EOFError, KeyboardInterrupt):
             break
-            
-        if choice == '1':
-            # Toggle Sound
-            SETTINGS["sound"] = not SETTINGS.get("sound", True)
-            save_settings(SETTINGS)
-            
-        elif choice == '2':
-            # Cycle Timer: 15 -> 30 -> 60 -> 120 -> 15
-            options = [15, 30, 60, 120]
-            current = SETTINGS.get("time_limit", 30)
-            try:
-                idx = options.index(current)
-                next_idx = (idx + 1) % len(options)
-                SETTINGS["time_limit"] = options[next_idx]
-            except ValueError:
-                SETTINGS["time_limit"] = 30 # Default if unknown value
-            save_settings(SETTINGS)
-            
-        elif choice == '3':
-            # Toggle Timer Display
-            SETTINGS["show_timer"] = not SETTINGS.get("show_timer", True)
-            save_settings(SETTINGS)
-            
-        elif choice == '4':
-            # Reset High Scores (Danger Zone)
-            # Clear screen and show warning
-            warning_lines = [
-                f"{Fore.RED}{Style.BRIGHT}ARE YOU SURE? THIS CANNOT BE UNDONE.{Style.RESET_ALL}",
-                "Type 'Y' or 'y' to confirm, anything else to cancel."
-            ]
-            confirm = draw_centered(warning_lines, input_prompt="Confirm Reset: ").strip().lower()
-            
-            if confirm == 'y':
-                defaults = {"Streak": {"score": 0, "name": "---"}}
-                save_high_scores(defaults)
-                # Show success
-                msg_lines = [
-                    f"{Fore.GREEN}Scores Reset!{Style.RESET_ALL}",
-                ]
-                draw_centered(msg_lines, input_prompt="Press Enter to continue...")
-            else:
-                # Cancelled
-                pass
-                
-        elif choice == '5':
-            break
-        else:
-            pass
 
 # --- Main Menu ---
 
@@ -818,15 +849,16 @@ def main_menu():
     """Runs the main menu loop."""
     while True:
         lines = [
-            f"{Fore.CYAN}{Style.BRIGHT}=== CLI TYPING GAME ==={Style.RESET_ALL}",
+            f"{Fore.CYAN}{Style.BRIGHT}=== HYPERTYPER ==={Style.RESET_ALL}",
             f"{Fore.CYAN}1. Play Game{Style.RESET_ALL}",
             f"{Fore.CYAN}2. High Scores{Style.RESET_ALL}",
-            f"{Fore.CYAN}3. Settings{Style.RESET_ALL}",
-            f"{Fore.CYAN}4. Quit{Style.RESET_ALL}"
+            f"{Fore.CYAN}3. Stats{Style.RESET_ALL}",
+            f"{Fore.CYAN}4. Settings{Style.RESET_ALL}",
+            f"{Fore.CYAN}5. Quit{Style.RESET_ALL}"
         ]
-        
+
         try:
-            choice = draw_centered(lines, input_prompt="Select an option (1-4): ").strip()
+            choice = choose(lines, "Select an option (1-5): ", 5).strip()
         except (EOFError, KeyboardInterrupt):
             print("\nGoodbye!")
             break
@@ -836,24 +868,20 @@ def main_menu():
         elif choice == '2':
             show_high_scores()
         elif choice == '3':
-            settings_menu()
+            show_stats()
         elif choice == '4':
+            settings_menu()
+        elif choice == '5':
             print("\nThanks for playing! Goodbye.")
             break
-        else:
-            # Invalid input, just loop again (or could print error)
-            pass
 
 if __name__ == "__main__":
     # Ensure highscore file exists
     if not os.path.exists(HIGHSCORE_FILE):
         save_high_scores({})
-    
-    # Load settings
-    load_settings()
 
-    # Clear screen immediately on launch
-    organize_sound_files()
+    load_settings()
+    apply_theme()
     init_audio()
     try:
         splash_screen()
